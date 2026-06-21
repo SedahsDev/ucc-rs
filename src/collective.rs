@@ -280,13 +280,35 @@ impl UccTeam {
             .post()
     }
 
+    // ---------------------------------------------------------------------------
+    // bcast
+    // ---------------------------------------------------------------------------
+
     /// Broadcast a buffer to all team members (safe slice version).
-    pub fn bcast(&self, buffer: &mut [u8], datatype: DataType, root: u64) -> Result<UccCollRequest, UccStatus> {
-        unsafe { self.bcast_raw(buffer.as_ptr() as *mut std::os::raw::c_void, buffer.len() as ucc_count_t, datatype, root) }
+    pub fn bcast(
+        &self,
+        buffer: &mut [u8],
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.bcast_raw(
+                buffer.as_ptr() as *mut std::os::raw::c_void,
+                buffer.len() as ucc_count_t,
+                datatype,
+                root,
+            )
+        }
     }
 
-    /// Broadcast a buffer to all team members (raw pointer version).
-    pub unsafe fn bcast_raw(&self, buffer: *mut std::os::raw::c_void, count: ucc_count_t, datatype: DataType, root: u64) -> Result<UccCollRequest, UccStatus> {
+    /// Low-level FFI wrapper for broadcast. Prefer the safe slice-based [`UccTeam::bcast`] or typed [`UccTeam::bcast_t`] variants.
+    pub unsafe fn bcast_raw(
+        &self,
+        buffer: *mut std::os::raw::c_void,
+        count: ucc_count_t,
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_BCAST)
             .src_buffer(buffer)
@@ -297,13 +319,47 @@ impl UccTeam {
             .post()
     }
 
-    /// Allreduce a buffer (safe slice version).
-    pub fn allreduce(&self, buffer: &mut [u8], datatype: DataType, op: ReductionOp) -> Result<UccCollRequest, UccStatus> {
-        unsafe { self.allreduce_raw(buffer.as_ptr() as *mut std::os::raw::c_void, buffer.len() as ucc_count_t, datatype, op) }
+    /// Typed broadcast for `&mut [T]` buffers.
+    pub fn bcast_t<T>(&self, buffer: &mut [T], datatype: DataType, root: u64) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.bcast_raw(
+                buffer.as_mut_ptr() as *mut std::os::raw::c_void,
+                buffer.len() as ucc_count_t,
+                datatype,
+                root,
+            )
+        }
     }
 
-    /// Allreduce a buffer (raw pointer version).
-    pub unsafe fn allreduce_raw(&self, buffer: *mut std::os::raw::c_void, count: ucc_count_t, datatype: DataType, op: ReductionOp) -> Result<UccCollRequest, UccStatus> {
+    // ---------------------------------------------------------------------------
+    // allreduce
+    // ---------------------------------------------------------------------------
+
+    /// Allreduce a buffer (safe slice version).
+    pub fn allreduce(
+        &self,
+        buffer: &mut [u8],
+        datatype: DataType,
+        op: ReductionOp,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.allreduce_raw(
+                buffer.as_ptr() as *mut std::os::raw::c_void,
+                buffer.len() as ucc_count_t,
+                datatype,
+                op,
+            )
+        }
+    }
+
+    /// Low-level FFI wrapper for allreduce. Prefer the safe slice-based [`UccTeam::allreduce`] or typed [`UccTeam::allreduce_t`] variants.
+    pub unsafe fn allreduce_raw(
+        &self,
+        buffer: *mut std::os::raw::c_void,
+        count: ucc_count_t,
+        datatype: DataType,
+        op: ReductionOp,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_ALLREDUCE)
             .src_buffer(buffer)
@@ -314,13 +370,58 @@ impl UccTeam {
             .post()
     }
 
-    /// Reduce from src into dst (safe slice version).
-    pub fn reduce(&self, src: &[u8], dst: &mut [u8], datatype: DataType, op: ReductionOp, root: u64) -> Result<UccCollRequest, UccStatus> {
-        unsafe { self.reduce_raw(src.as_ptr() as *mut std::os::raw::c_void, dst.as_ptr() as *mut std::os::raw::c_void, src.len() as ucc_count_t, datatype, op, root) }
+    /// Typed allreduce for `&mut [T]` buffers.
+    pub fn allreduce_t<T>(
+        &self,
+        buffer: &mut [T],
+        datatype: DataType,
+        op: ReductionOp,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.allreduce_raw(
+                buffer.as_mut_ptr() as *mut std::os::raw::c_void,
+                buffer.len() as ucc_count_t,
+                datatype,
+                op,
+            )
+        }
     }
 
-    /// Reduce from src into dst (raw pointer version).
-    pub unsafe fn reduce_raw(&self, src: *mut std::os::raw::c_void, dst: *mut std::os::raw::c_void, count: ucc_count_t, datatype: DataType, op: ReductionOp, root: u64) -> Result<UccCollRequest, UccStatus> {
+    // ---------------------------------------------------------------------------
+    // reduce
+    // ---------------------------------------------------------------------------
+
+    /// Reduce from src into dst (safe slice version).
+    pub fn reduce(
+        &self,
+        src: &[u8],
+        dst: &mut [u8],
+        datatype: DataType,
+        op: ReductionOp,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.reduce_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                op,
+                root,
+            )
+        }
+    }
+
+    /// Low-level FFI wrapper for reduce. Prefer the safe slice-based [`UccTeam::reduce`] or typed [`UccTeam::reduce_t`] variants.
+    pub unsafe fn reduce_raw(
+        &self,
+        src: *mut std::os::raw::c_void,
+        dst: *mut std::os::raw::c_void,
+        count: ucc_count_t,
+        datatype: DataType,
+        op: ReductionOp,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_REDUCE)
             .src_buffer(src)
@@ -332,13 +433,56 @@ impl UccTeam {
             .post()
     }
 
-    /// Allgather from src into dst (safe slice version).
-    pub fn allgather(&self, src: &[u8], dst: &mut [u8], datatype: DataType) -> Result<UccCollRequest, UccStatus> {
-        unsafe { self.allgather_raw(src.as_ptr() as *mut std::os::raw::c_void, dst.as_ptr() as *mut std::os::raw::c_void, src.len() as ucc_count_t, datatype) }
+    /// Typed reduce for `[T]` buffers.
+    pub fn reduce_t<T>(
+        &self,
+        src: &[T],
+        dst: &mut [T],
+        datatype: DataType,
+        op: ReductionOp,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.reduce_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_mut_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                op,
+                root,
+            )
+        }
     }
 
-    /// Allgather from src into dst (raw pointer version).
-    pub unsafe fn allgather_raw(&self, src: *mut std::os::raw::c_void, dst: *mut std::os::raw::c_void, count: ucc_count_t, datatype: DataType) -> Result<UccCollRequest, UccStatus> {
+    // ---------------------------------------------------------------------------
+    // allgather
+    // ---------------------------------------------------------------------------
+
+    /// Allgather from src into dst (safe slice version).
+    pub fn allgather(
+        &self,
+        src: &[u8],
+        dst: &mut [u8],
+        datatype: DataType,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.allgather_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+            )
+        }
+    }
+
+    /// Low-level FFI wrapper for allgather. Prefer the safe slice-based [`UccTeam::allgather`] or typed [`UccTeam::allgather_t`] variants.
+    pub unsafe fn allgather_raw(
+        &self,
+        src: *mut std::os::raw::c_void,
+        dst: *mut std::os::raw::c_void,
+        count: ucc_count_t,
+        datatype: DataType,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_ALLGATHER)
             .src_buffer(src)
@@ -348,13 +492,55 @@ impl UccTeam {
             .post()
     }
 
-    /// Gather from src into dst (safe slice version).
-    pub fn gather(&self, src: &[u8], dst: &mut [u8], datatype: DataType, root: u64) -> Result<UccCollRequest, UccStatus> {
-        unsafe { self.gather_raw(src.as_ptr() as *mut std::os::raw::c_void, dst.as_ptr() as *mut std::os::raw::c_void, src.len() as ucc_count_t, datatype, root) }
+    /// Typed allgather for `[T]` buffers.
+    pub fn allgather_t<T>(
+        &self,
+        src: &[T],
+        dst: &mut [T],
+        datatype: DataType,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.allgather_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_mut_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+            )
+        }
     }
 
-    /// Gather from src into dst (raw pointer version).
-    pub unsafe fn gather_raw(&self, src: *mut std::os::raw::c_void, dst: *mut std::os::raw::c_void, count: ucc_count_t, datatype: DataType, root: u64) -> Result<UccCollRequest, UccStatus> {
+    // ---------------------------------------------------------------------------
+    // gather
+    // ---------------------------------------------------------------------------
+
+    /// Gather from src into dst (safe slice version).
+    pub fn gather(
+        &self,
+        src: &[u8],
+        dst: &mut [u8],
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.gather_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                root,
+            )
+        }
+    }
+
+    /// Low-level FFI wrapper for gather. Prefer the safe slice-based [`UccTeam::gather`] or typed [`UccTeam::gather_t`] variants.
+    pub unsafe fn gather_raw(
+        &self,
+        src: *mut std::os::raw::c_void,
+        dst: *mut std::os::raw::c_void,
+        count: ucc_count_t,
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_GATHER)
             .src_buffer(src)
@@ -365,8 +551,37 @@ impl UccTeam {
             .post()
     }
 
-    /// Allgatherv collective (raw pointer version — no safe variant due to variable-count API).
-    pub unsafe fn allgatherv_raw(&self, src: *mut std::os::raw::c_void, dst: *mut std::os::raw::c_void, recvcounts: *const ucc_count_t, datatype: DataType) -> Result<UccCollRequest, UccStatus> {
+    /// Typed gather for `[T]` buffers.
+    pub fn gather_t<T>(
+        &self,
+        src: &[T],
+        dst: &mut [T],
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.gather_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_mut_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                root,
+            )
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // allgatherv (raw only — variable-count API)
+    // ---------------------------------------------------------------------------
+
+    /// Low-level FFI wrapper for allgatherv. No safe variant due to variable-count API.
+    pub unsafe fn allgatherv_raw(
+        &self,
+        src: *mut std::os::raw::c_void,
+        dst: *mut std::os::raw::c_void,
+        recvcounts: *const ucc_count_t,
+        datatype: DataType,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_ALLGATHERV)
             .src_buffer(src)
@@ -376,13 +591,38 @@ impl UccTeam {
             .post()
     }
 
+    // ---------------------------------------------------------------------------
+    // scatter
+    // ---------------------------------------------------------------------------
+
     /// Scatter from src into dst (safe slice version).
-    pub fn scatter(&self, src: &[u8], dst: &mut [u8], datatype: DataType, root: u64) -> Result<UccCollRequest, UccStatus> {
-        unsafe { self.scatter_raw(src.as_ptr() as *mut std::os::raw::c_void, dst.as_ptr() as *mut std::os::raw::c_void, src.len() as ucc_count_t, datatype, root) }
+    pub fn scatter(
+        &self,
+        src: &[u8],
+        dst: &mut [u8],
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.scatter_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                root,
+            )
+        }
     }
 
-    /// Scatter from src into dst (raw pointer version).
-    pub unsafe fn scatter_raw(&self, src: *mut std::os::raw::c_void, dst: *mut std::os::raw::c_void, count: ucc_count_t, datatype: DataType, root: u64) -> Result<UccCollRequest, UccStatus> {
+    /// Low-level FFI wrapper for scatter. Prefer the safe slice-based [`UccTeam::scatter`] or typed [`UccTeam::scatter_t`] variants.
+    pub unsafe fn scatter_raw(
+        &self,
+        src: *mut std::os::raw::c_void,
+        dst: *mut std::os::raw::c_void,
+        count: ucc_count_t,
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_SCATTER)
             .src_buffer(src)
@@ -393,13 +633,57 @@ impl UccTeam {
             .post()
     }
 
-    /// Reduce-scatter from src into dst (safe slice version).
-    pub fn reduce_scatter(&self, src: &[u8], dst: &mut [u8], datatype: DataType, op: ReductionOp) -> Result<UccCollRequest, UccStatus> {
-        unsafe { self.reduce_scatter_raw(src.as_ptr() as *mut std::os::raw::c_void, dst.as_ptr() as *mut std::os::raw::c_void, src.len() as ucc_count_t, datatype, op) }
+    /// Typed scatter for `[T]` buffers.
+    pub fn scatter_t<T>(
+        &self,
+        src: &[T],
+        dst: &mut [T],
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.scatter_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_mut_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                root,
+            )
+        }
     }
 
-    /// Reduce-scatter from src into dst (raw pointer version).
-    pub unsafe fn reduce_scatter_raw(&self, src: *mut std::os::raw::c_void, dst: *mut std::os::raw::c_void, count: ucc_count_t, datatype: DataType, op: ReductionOp) -> Result<UccCollRequest, UccStatus> {
+    // ---------------------------------------------------------------------------
+    // reduce_scatter
+    // ---------------------------------------------------------------------------
+
+    /// Reduce-scatter from src into dst (safe slice version).
+    pub fn reduce_scatter(
+        &self,
+        src: &[u8],
+        dst: &mut [u8],
+        datatype: DataType,
+        op: ReductionOp,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.reduce_scatter_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                op,
+            )
+        }
+    }
+
+    /// Low-level FFI wrapper for reduce-scatter. Prefer the safe slice-based [`UccTeam::reduce_scatter`] or typed [`UccTeam::reduce_scatter_t`] variants.
+    pub unsafe fn reduce_scatter_raw(
+        &self,
+        src: *mut std::os::raw::c_void,
+        dst: *mut std::os::raw::c_void,
+        count: ucc_count_t,
+        datatype: DataType,
+        op: ReductionOp,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_REDUCE_SCATTER)
             .src_buffer(src)
@@ -410,13 +694,54 @@ impl UccTeam {
             .post()
     }
 
-    /// Alltoall from src into dst (safe slice version).
-    pub fn alltoall(&self, src: &[u8], dst: &mut [u8], datatype: DataType) -> Result<UccCollRequest, UccStatus> {
-        unsafe { self.alltoall_raw(src.as_ptr() as *mut std::os::raw::c_void, dst.as_ptr() as *mut std::os::raw::c_void, src.len() as ucc_count_t, datatype) }
+    /// Typed reduce-scatter for `[T]` buffers.
+    pub fn reduce_scatter_t<T>(
+        &self,
+        src: &[T],
+        dst: &mut [T],
+        datatype: DataType,
+        op: ReductionOp,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.reduce_scatter_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_mut_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                op,
+            )
+        }
     }
 
-    /// Alltoall from src into dst (raw pointer version).
-    pub unsafe fn alltoall_raw(&self, src: *mut std::os::raw::c_void, dst: *mut std::os::raw::c_void, count: ucc_count_t, datatype: DataType) -> Result<UccCollRequest, UccStatus> {
+    // ---------------------------------------------------------------------------
+    // alltoall
+    // ---------------------------------------------------------------------------
+
+    /// Alltoall from src into dst (safe slice version).
+    pub fn alltoall(
+        &self,
+        src: &[u8],
+        dst: &mut [u8],
+        datatype: DataType,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.alltoall_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+            )
+        }
+    }
+
+    /// Low-level FFI wrapper for alltoall. Prefer the safe slice-based [`UccTeam::alltoall`] or typed [`UccTeam::alltoall_t`] variants.
+    pub unsafe fn alltoall_raw(
+        &self,
+        src: *mut std::os::raw::c_void,
+        dst: *mut std::os::raw::c_void,
+        count: ucc_count_t,
+        datatype: DataType,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALL)
             .src_buffer(src)
@@ -426,13 +751,58 @@ impl UccTeam {
             .post()
     }
 
-    /// Fanin from src into dst (safe slice version).
-    pub fn fanin(&self, src: &[u8], dst: &mut [u8], datatype: DataType, op: ReductionOp, root: u64) -> Result<UccCollRequest, UccStatus> {
-        unsafe { self.fanin_raw(src.as_ptr() as *mut std::os::raw::c_void, dst.as_ptr() as *mut std::os::raw::c_void, src.len() as ucc_count_t, datatype, op, root) }
+    /// Typed alltoall for `[T]` buffers.
+    pub fn alltoall_t<T>(
+        &self,
+        src: &[T],
+        dst: &mut [T],
+        datatype: DataType,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.alltoall_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_mut_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+            )
+        }
     }
 
-    /// Fanin from src into dst (raw pointer version).
-    pub unsafe fn fanin_raw(&self, src: *mut std::os::raw::c_void, dst: *mut std::os::raw::c_void, count: ucc_count_t, datatype: DataType, op: ReductionOp, root: u64) -> Result<UccCollRequest, UccStatus> {
+    // ---------------------------------------------------------------------------
+    // fanin
+    // ---------------------------------------------------------------------------
+
+    /// Fanin from src into dst (safe slice version).
+    pub fn fanin(
+        &self,
+        src: &[u8],
+        dst: &mut [u8],
+        datatype: DataType,
+        op: ReductionOp,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.fanin_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                op,
+                root,
+            )
+        }
+    }
+
+    /// Low-level FFI wrapper for fanin. Prefer the safe slice-based [`UccTeam::fanin`] or typed [`UccTeam::fanin_t`] variants.
+    pub unsafe fn fanin_raw(
+        &self,
+        src: *mut std::os::raw::c_void,
+        dst: *mut std::os::raw::c_void,
+        count: ucc_count_t,
+        datatype: DataType,
+        op: ReductionOp,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_FANIN)
             .src_buffer(src)
@@ -444,13 +814,59 @@ impl UccTeam {
             .post()
     }
 
-    /// Fanout from src into dst (safe slice version).
-    pub fn fanout(&self, src: &[u8], dst: &mut [u8], datatype: DataType, root: u64) -> Result<UccCollRequest, UccStatus> {
-        unsafe { self.fanout_raw(src.as_ptr() as *mut std::os::raw::c_void, dst.as_ptr() as *mut std::os::raw::c_void, src.len() as ucc_count_t, datatype, root) }
+    /// Typed fanin for `[T]` buffers.
+    pub fn fanin_t<T>(
+        &self,
+        src: &[T],
+        dst: &mut [T],
+        datatype: DataType,
+        op: ReductionOp,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.fanin_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_mut_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                op,
+                root,
+            )
+        }
     }
 
-    /// Fanout from src into dst (raw pointer version).
-    pub unsafe fn fanout_raw(&self, src: *mut std::os::raw::c_void, dst: *mut std::os::raw::c_void, count: ucc_count_t, datatype: DataType, root: u64) -> Result<UccCollRequest, UccStatus> {
+    // ---------------------------------------------------------------------------
+    // fanout
+    // ---------------------------------------------------------------------------
+
+    /// Fanout from src into dst (safe slice version).
+    pub fn fanout(
+        &self,
+        src: &[u8],
+        dst: &mut [u8],
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.fanout_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                root,
+            )
+        }
+    }
+
+    /// Low-level FFI wrapper for fanout. Prefer the safe slice-based [`UccTeam::fanout`] or typed [`UccTeam::fanout_t`] variants.
+    pub unsafe fn fanout_raw(
+        &self,
+        src: *mut std::os::raw::c_void,
+        dst: *mut std::os::raw::c_void,
+        count: ucc_count_t,
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
         CollectiveBuilder::new(self)
             .coll_type(ucc_coll_type_t_UCC_COLL_TYPE_FANOUT)
             .src_buffer(src)
@@ -459,5 +875,24 @@ impl UccTeam {
             .datatype(datatype)
             .root(root)
             .post()
+    }
+
+    /// Typed fanout for `[T]` buffers.
+    pub fn fanout_t<T>(
+        &self,
+        src: &[T],
+        dst: &mut [T],
+        datatype: DataType,
+        root: u64,
+    ) -> Result<UccCollRequest, UccStatus> {
+        unsafe {
+            self.fanout_raw(
+                src.as_ptr() as *mut std::os::raw::c_void,
+                dst.as_mut_ptr() as *mut std::os::raw::c_void,
+                src.len() as ucc_count_t,
+                datatype,
+                root,
+            )
+        }
     }
 }
