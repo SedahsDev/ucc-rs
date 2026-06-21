@@ -1,0 +1,19 @@
+[package]
+name = "ucc"
+version = "0.1.0"
+edition = "2021"
+description = "Safe Rust bindings for UCC (Unified Collective Communication)"
+license = "BSD"
+
+[build-dependencies]
+bindgen = "0.70.1"
+
+[dependencies]
+libc = "0.2"
+
+# Optional: integrate with ucx-rs for tl/ucp path
+ucx-sys = { path = "../ucx/bindings/rust", optional = true }
+
+[features]
+default = []
+ucx-integration = ["dep:ucx-sys"]

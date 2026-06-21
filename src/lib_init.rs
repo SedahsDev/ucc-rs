@@ -1,0 +1,85 @@
+//! UCC library initialization and finalization.
+//!
+//! Manages the lifetime of the UCC library handle (`ucc_lib_h`).
+
+use crate::bindings::{
+    ucc_finalize, ucc_init_version, ucc_lib_h, ucc_lib_params,
+    ucc_thread_mode_t_UCC_THREAD_SINGLE,
+    ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
+    ucc_lib_params_field_UCC_LIB_PARAM_FIELD_THREAD_MODE,
+    ucc_lib_params_field_UCC_LIB_PARAM_FIELD_COLL_TYPES,
+    ucc_lib_params_field_UCC_LIB_PARAM_FIELD_SYNC_TYPE,
+    ucc_lib_params_field_UCC_LIB_PARAM_FIELD_REDUCTION_TYPES,
+};
+use crate::status::{check_status, UccStatus};
+
+/// UCC library handle with RAII cleanup.
+#[derive(Clone)]
+pub struct UccLib {
+    handle: ucc_lib_h,
+}
+
+impl UccLib {
+    /// Initialize the UCC library with default parameters.
+    pub fn init() -> Result<Self, UccStatus> {
+        Self::with_params(Default::default())
+    }
+
+    /// Initialize the UCC library with custom parameters.
+    pub fn with_params(lib_params: UccLibParams) -> Result<Self, UccStatus> {
+        let mut lib: ucc_lib_h = std::ptr::null_mut();
+        let status = unsafe {
+            ucc_init_version(
+                1,
+                9,
+                &lib_params.0,
+                std::ptr::null_mut(),
+                &mut lib,
+            )
+        };
+        check_status(status)?;
+        Ok(Self { handle: lib })
+    }
+
+    /// Get a raw handle for use with lower-level APIs.
+    pub fn handle(&self) -> ucc_lib_h {
+        self.handle
+    }
+}
+
+impl Drop for UccLib {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe {
+                ucc_finalize(self.handle);
+            }
+            self.handle = std::ptr::null_mut();
+        }
+    }
+}
+
+/// Parameters for UCC library initialization.
+pub struct UccLibParams(ucc_lib_params);
+
+impl Default for UccLibParams {
+    fn default() -> Self {
+        let mut params: ucc_lib_params = unsafe { std::mem::zeroed() };
+        params.thread_mode = ucc_thread_mode_t_UCC_THREAD_SINGLE;
+        params.sync_type = ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES;
+        params.mask = ucc_lib_params_field_UCC_LIB_PARAM_FIELD_THREAD_MODE as u64
+            | ucc_lib_params_field_UCC_LIB_PARAM_FIELD_COLL_TYPES as u64
+            | ucc_lib_params_field_UCC_LIB_PARAM_FIELD_SYNC_TYPE as u64
+            | ucc_lib_params_field_UCC_LIB_PARAM_FIELD_REDUCTION_TYPES as u64;
+        // Request all collective and reduction types
+        params.coll_types = u64::MAX;
+        params.reduction_types = u64::MAX;
+        Self(params)
+    }
+}
+
+impl UccLibParams {
+    /// Access the inner params for advanced configuration.
+    pub fn inner_mut(&mut self) -> &mut ucc_lib_params {
+        &mut self.0
+    }
+}

@@ -1,0 +1,97 @@
+//! UCC memory mapping and management.
+
+use crate::bindings::{
+    ucc_mem_map, ucc_mem_map_mem_h, ucc_mem_map_params,
+    ucc_mem_map_params_t, ucc_mem_unmap,
+    // constified enum constants
+    ucc_mem_map_mode_t_UCC_MEM_MAP_MODE_EXPORT,
+};
+use crate::context::UccContext;
+use crate::status::{check_status, UccStatus};
+
+/// Memory handle with RAII cleanup.
+pub struct UccMemHandle {
+    memh: ucc_mem_map_mem_h,
+    mapped_len: usize,
+}
+
+impl UccMemHandle {
+    /// Map memory at a context using a raw pointer and length.
+    ///
+    /// # Safety
+    /// The caller must ensure that `addr` points to a valid memory region
+    /// of at least `length` bytes that remains valid for the lifetime of
+    /// the returned [`UccMemHandle`].
+    pub unsafe fn map_raw(context: &UccContext, addr: *mut std::os::raw::c_void, length: usize) -> Result<Self, UccStatus> {
+        let ctx_handle = context.handle();
+        let mut memh: ucc_mem_map_mem_h = std::ptr::null_mut();
+        let mut memh_size: usize = 0;
+
+        // Build params with segments
+        let mut segments = [ucc_mem_map {
+            address: addr,
+            len: length,
+        }];
+        let params: ucc_mem_map_params_t = ucc_mem_map_params {
+            segments: segments.as_mut_ptr(),
+            n_segments: 1,
+        };
+
+        let status = unsafe {
+            ucc_mem_map(
+                ctx_handle,
+                ucc_mem_map_mode_t_UCC_MEM_MAP_MODE_EXPORT,
+                &params,
+                &mut memh_size,
+                &mut memh,
+            )
+        };
+        check_status(status)?;
+        if memh.is_null() {
+            return Err(UccStatus(-5));
+        }
+        Ok(Self { memh, mapped_len: length })
+    }
+
+    /// Safely map a shared byte slice at a context.
+    ///
+    /// This method does not copy the data — it only registers the slice's
+    /// address and length with the C API. The caller must ensure the
+    /// underlying memory remains valid for the lifetime of the returned
+    /// [`UccMemHandle`].
+    pub fn map_slice(context: &UccContext, slice: &[u8]) -> Result<Self, UccStatus> {
+        unsafe { Self::map_raw(context, slice.as_ptr() as *mut std::os::raw::c_void, slice.len()) }
+    }
+
+    /// Safely map a mutable byte slice at a context.
+    ///
+    /// This method does not copy the data — it only registers the slice's
+    /// address and length with the C API. The caller must ensure the
+    /// underlying memory remains valid for the lifetime of the returned
+    /// [`UccMemHandle`].
+    pub fn map_slice_mut(context: &UccContext, slice: &mut [u8]) -> Result<Self, UccStatus> {
+        unsafe { Self::map_raw(context, slice.as_mut_ptr() as *mut std::os::raw::c_void, slice.len()) }
+    }
+
+    /// Get the raw memory handle.
+    pub fn handle(&self) -> ucc_mem_map_mem_h {
+        self.memh
+    }
+
+    /// Get the length of the mapped memory region.
+    pub fn mapped_len(&self) -> usize {
+        self.mapped_len
+    }
+}
+
+impl Drop for UccMemHandle {
+    fn drop(&mut self) {
+        if !self.memh.is_null() {
+            let mut memh = self.memh;
+            unsafe {
+                ucc_mem_unmap(&mut memh);
+            }
+            self.memh = std::ptr::null_mut();
+        }
+    }
+}
