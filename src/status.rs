@@ -43,6 +43,7 @@ use crate::bindings::ucc_status_t;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 #[non_exhaustive]
+#[must_use = "UccError values should be handled, not ignored"]
 pub enum UccError {
     // ── Success ────────────────────────────────────────────────────────────
     /// `UCC_OK` (0) — operation completed successfully.
@@ -173,6 +174,7 @@ impl std::fmt::Display for UccError {
 /// Use [`UccStatus::from_raw`] to convert a `ucc_status_t` received from C
 /// and [`UccStatus::to_raw`] to convert back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[must_use = "UccStatus values should be handled, not ignored"]
 pub enum UccStatus {
     /// A known, standard UCC status code.
     Known(UccError),
@@ -262,6 +264,7 @@ impl From<ucc_status_t> for UccStatus {
 ///
 /// Returns `Ok(())` for `UCC_OK` and `Err(UccStatus)` for anything else
 /// (including `UCC_INPROGRESS` and error codes).
+#[must_use = "Status checks should not be ignored"]
 pub fn check_status(status: ucc_status_t) -> Result<(), UccStatus> {
     let ucc_status = UccStatus::from_raw(status as i32);
     if ucc_status.is_ok() {

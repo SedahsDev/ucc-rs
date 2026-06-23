@@ -106,6 +106,11 @@ impl DataType {
 }
 
 /// UCC collective request handle with RAII cleanup.
+///
+/// Represents an in-flight collective operation. Must be polled via
+/// [`test`](Self::test) or waited on via [`wait`](Self::wait) to complete.
+/// Holds a reference to the [`UccTeam`] it was created from, keeping the
+/// team alive. Automatically calls `ucc_collective_finalize` on drop.
 pub struct UccCollRequest {
     handle: ucc_coll_req_h,
     _team: UccTeam,

@@ -13,6 +13,16 @@
 //! let lib = UccLib::init().unwrap();
 //! // lib is automatically finalized when dropped
 //! ```
+//!
+//! # Module Overview
+//!
+//! * [`lib_init`] — Initialize and finalize the UCC library (`UccLib`).
+//! * [`context`] — Create and manage communication contexts (`UccContext`).
+//! * [`team`] — Create and manage teams of processes (`UccTeam`).
+//! * [`collective`] — Run collective operations (barrier, bcast, allreduce, etc.).
+//! * [`memory`] — Map host memory for use in collectives (`UccMemHandle`).
+//! * [`event_engine`] — Event-driven execution engine for triggered collectives.
+//! * [`status`] — Status codes and error handling (`UccError`, `UccStatus`).
 
 // Auto-generated FFI bindings from ucc.h
 mod bindings;

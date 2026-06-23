@@ -1,4 +1,16 @@
 //! UCC memory mapping and management.
+//!
+//! Registers host memory regions with UCC so they can be used in collective
+//! operations. Memory is mapped via [`UccMemHandle::map_raw`] (unsafe pointer),
+//! [`UccMemHandle::map_slice`] (immutable slice), or [`UccMemHandle::map_slice_mut`]
+//! (mutable slice). The returned handle holds the mapping and automatically
+//! unmaps the memory on drop.
+//!
+//! # Safety
+//!
+//! The underlying memory must remain valid for the entire lifetime of the
+//! [`UccMemHandle`]. UCC does not copy the data — it only records the address
+//! and length for later use by collective operations.
 
 use crate::bindings::{
     ucc_mem_map, ucc_mem_map_mem_h, ucc_mem_map_params,
@@ -10,6 +22,15 @@ use crate::context::UccContext;
 use crate::status::{check_status, UccError, UccStatus};
 
 /// Memory handle with RAII cleanup.
+///
+/// Represents a memory region registered with UCC. The handle holds the
+/// mapping and automatically unmaps the memory on drop.
+///
+/// # Safety
+///
+/// The underlying memory must remain valid for the entire lifetime of this
+/// handle. UCC does not copy the data — it only records the address and
+/// length for later use by collective operations.
 pub struct UccMemHandle {
     memh: ucc_mem_map_mem_h,
     mapped_len: usize,

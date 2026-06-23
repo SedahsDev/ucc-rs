@@ -4,25 +4,35 @@
 //! It wraps the underlying UCX context for the `tl/ucp` transport.
 
 use crate::bindings::{
-    ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_config_h,
-    ucc_context_config_read, ucc_context_config_release, ucc_context_create,
-    ucc_context_destroy, ucc_context_h, ucc_context_params, ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID,
+    ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
+    ucc_context_config_h, ucc_context_config_read, ucc_context_config_release,
+    ucc_context_create, ucc_context_destroy, ucc_context_h, ucc_context_params,
+    ucc_context_type_t, ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
+    ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE,
-    ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE, ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
+    ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE,
 };
 use crate::lib_init::UccLib;
 use crate::status::{check_status, UccError, UccStatus};
 
 /// UCC context config handle with RAII cleanup.
+///
+/// Holds a `ucc_context_config_h` obtained from `ucc_context_config_read`.
+/// Must be created before calling `ucc_context_create`. Dropped automatically,
+/// releasing the underlying C config handle.
+#[must_use = "Config handles should be kept alive or explicitly dropped"]
 pub struct UccContextConfig {
     handle: ucc_context_config_h,
 }
 
 impl UccContextConfig {
     /// Read the UCC context configuration from environment variables.
+    #[must_use = "Result should be checked"]
     pub fn read(lib: &UccLib) -> Result<Self, UccStatus> {
         let mut config: ucc_context_config_h = std::ptr::null_mut();
         let status = unsafe {
+             // Safety: lib.handle() is a valid handle from UccLib; ucc_context_config_read
+             // accepts NULL for the parent config argument and only writes to &mut config.
             ucc_context_config_read(lib.handle(), std::ptr::null(), &mut config)
         };
         check_status(status)?;
@@ -38,6 +48,9 @@ impl UccContextConfig {
 impl Drop for UccContextConfig {
     fn drop(&mut self) {
         if !self.handle.is_null() {
+             // Safety: handle was validated non-null above and the C function only
+             // dereferences the handle pointer for cleanup. Handle is nulled after
+             // to prevent double-free.
             unsafe {
                 ucc_context_config_release(self.handle);
             }
@@ -47,6 +60,12 @@ impl Drop for UccContextConfig {
 }
 
 /// UCC context handle with RAII cleanup.
+///
+/// Represents a UCC communication context — the primary resource for
+/// creating teams and running collective operations. Holds a reference
+/// to the [`UccLib`] that created it, keeping the library alive.
+/// Cloneable — each clone shares the same underlying C handle.
+#[must_use = "Context handles should be kept alive or explicitly dropped"]
 #[derive(Clone)]
 pub struct UccContext {
     handle: ucc_context_h,
@@ -55,11 +74,13 @@ pub struct UccContext {
 
 impl UccContext {
     /// Create a new context with default parameters.
+    #[must_use = "Result should be checked"]
     pub fn new(lib: UccLib) -> Result<Self, UccStatus> {
         Self::with_params(lib, Default::default())
     }
 
     /// Create a new context with custom parameters.
+    #[must_use = "Result should be checked"]
     pub fn with_params(lib: UccLib, ctx_params: UccContextParams) -> Result<Self, UccStatus> {
         // Must create a context config before creating the context.
         // ucc_context_create dereferences the config pointer internally,
@@ -68,6 +89,8 @@ impl UccContext {
         let lib_handle = lib.handle();
         let mut context: ucc_context_h = std::ptr::null_mut();
         let status = unsafe {
+             // Safety: lib_handle and config.handle() are valid; &ctx_params.0 is a valid
+             // reference; &mut context is a valid output pointer.
             ucc_context_create(
                 lib_handle,
                 &ctx_params.0,
@@ -95,6 +118,9 @@ impl UccContext {
 impl Drop for UccContext {
     fn drop(&mut self) {
         if !self.handle.is_null() {
+             // Safety: handle was validated non-null above and the C function only
+             // dereferences the handle pointer for cleanup. Handle is nulled after
+             // to prevent double-free.
             unsafe {
                 ucc_context_destroy(self.handle);
             }
@@ -104,10 +130,21 @@ impl Drop for UccContext {
 }
 
 /// Parameters for UCC context creation.
+///
+/// Wraps `ucc_context_params` and manages the field mask automatically.
+///
+/// # Default values
+///
+/// * `type_` — `UCC_CONTEXT_EXCLUSIVE`
+/// * `sync_type` — `UCC_SYNC_COLLECTIVES`
+/// * OOB callbacks — all set to `None` / null
+#[must_use = "Context params should be used to create a context"]
 pub struct UccContextParams(ucc_context_params);
 
 impl Default for UccContextParams {
     fn default() -> Self {
+         // Safety: ucc_context_params is a POD struct with no pointers or discriminants
+         // that the C API only reads fields indicated by the mask.
         let mut params: ucc_context_params = unsafe { std::mem::zeroed() };
         params.type_ = ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE;
         params.sync_type = ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES;
@@ -124,10 +161,28 @@ impl Default for UccContextParams {
 }
 
 impl UccContextParams {
+    /// Set the context type.
+    pub fn with_type(&mut self, ctx_type: ucc_context_type_t) {
+        self.0.type_ = ctx_type;
+        self.0.mask |= crate::bindings::ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE as u64;
+    }
+
+    /// Set the collective sync type.
+    pub fn with_sync_type(&mut self, sync_type: ucc_coll_sync_type_t) {
+        self.0.sync_type = sync_type;
+        self.0.mask |= crate::bindings::ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE as u64;
+    }
+
     /// Set the context ID.
     pub fn with_id(&mut self, id: u64) {
         self.0.ctx_id = id;
-        self.0.mask |= ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID as u64;
+        self.0.mask |= crate::bindings::ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID as u64;
+    }
+
+    /// Set OOB callbacks.
+    pub fn with_oob(&mut self, oob: crate::bindings::ucc_context_oob_coll_t) {
+        self.0.oob = oob;
+        // No specific mask bit for OOB in the current bindings; set via inner_mut if needed
     }
 
     /// Get mutable access to the underlying FFI struct for advanced configuration.
