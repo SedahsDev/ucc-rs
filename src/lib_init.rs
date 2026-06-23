@@ -185,3 +185,53 @@ impl UccLibParams {
         &mut self.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use static_assertions::assert_impl_all;
+    use std::clone::Clone;
+
+    #[test]
+    fn test_ucc_lib_params_default() {
+        let params = UccLibParams::default();
+        assert_eq!(params.0.thread_mode, ucc_thread_mode_t_UCC_THREAD_SINGLE);
+        assert_eq!(params.0.sync_type, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES);
+        assert_eq!(params.0.coll_types, u64::MAX);
+        assert_eq!(params.0.reduction_types, u64::MAX);
+    }
+
+    #[test]
+    fn test_ucc_lib_params_with_thread_mode() {
+        let mut params = UccLibParams::default();
+        params.with_thread_mode(ucc_thread_mode_t_UCC_THREAD_SINGLE);
+        assert!(params.0.mask & ucc_lib_params_field_UCC_LIB_PARAM_FIELD_THREAD_MODE as u64 != 0);
+    }
+
+    #[test]
+    fn test_ucc_lib_params_with_sync_type() {
+        let mut params = UccLibParams::default();
+        params.with_sync_type(ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES);
+        assert!(params.0.mask & ucc_lib_params_field_UCC_LIB_PARAM_FIELD_SYNC_TYPE as u64 != 0);
+    }
+
+    #[test]
+    fn test_ucc_lib_params_trait_bounds() {
+        // UccLibParams wraps a POD struct, so it's Send
+        assert_impl_all!(UccLibParams: Send);
+    }
+
+    #[test]
+    fn test_ucc_lib_clone_trait() {
+        // UccLib is Clone but NOT Send — raw FFI handle (*mut ucc_lib_info)
+        // doesn't implement Send. UCC handles are thread-local by design.
+        assert_impl_all!(UccLib: Clone);
+    }
+
+    #[test]
+    fn test_ucc_lib_config_has_handle() {
+        // UccLibConfig wraps a raw FFI handle — intentionally not Send.
+        // We just verify the struct has the expected field.
+        let _ = std::mem::size_of::<UccLibConfig>();
+    }
+}

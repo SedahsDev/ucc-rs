@@ -8,7 +8,7 @@
 //! # Quick Start
 //!
 //! ```no_run
-//! use ucc_rs::UccLib;
+//! use ucc::lib_init::UccLib;
 //!
 //! let lib = UccLib::init().unwrap();
 //! // lib is automatically finalized when dropped

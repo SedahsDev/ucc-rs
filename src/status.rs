@@ -14,7 +14,7 @@
 //! # Example
 //!
 //! ```
-//! use ucc_rs::{UccError, UccStatus};
+//! use ucc::{UccError, UccStatus};
 //!
 //! assert_eq!(UccStatus::from_raw(0), UccStatus::Known(UccError::Ok));
 //! assert_eq!(UccStatus::from_raw(1), UccStatus::Known(UccError::InProgress));
@@ -186,7 +186,7 @@ impl UccStatus {
     /// Convert a raw `ucc_status_t` (`i32`) into a `UccStatus`.
     ///
     /// ```
-    /// use ucc_rs::{UccError, UccStatus};
+    /// use ucc::{UccError, UccStatus};
     ///
     /// assert_eq!(UccStatus::from_raw(0), UccStatus::Known(UccError::Ok));
     /// assert_eq!(UccStatus::from_raw(1), UccStatus::Known(UccError::InProgress));
@@ -281,6 +281,21 @@ pub fn check_status(status: ucc_status_t) -> Result<(), UccStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use static_assertions::assert_impl_all;
+    use std::fmt::Debug;
+    use std::hash::Hash;
+
+    // ── Compile-time trait checks ──────────────────────────────────────────
+
+    #[test]
+    fn test_ucc_error_trait_bounds() {
+        assert_impl_all!(UccError: Debug, Clone, Copy, PartialEq, Eq, Hash, Send, Sync);
+    }
+
+    #[test]
+    fn test_ucc_status_trait_bounds() {
+        assert_impl_all!(UccStatus: Debug, Clone, Copy, PartialEq, Eq, Hash, Send, Sync, std::error::Error);
+    }
 
     #[test]
     fn test_ucc_error_from_raw_known() {

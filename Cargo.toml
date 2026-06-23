@@ -14,6 +14,9 @@ libc = "0.2"
 # Optional: integrate with ucx-rs for tl/ucp path
 ucx-sys = { path = "../ucx/bindings/rust", optional = true }
 
+[dev-dependencies]
+static_assertions = "1"
+
 [features]
 default = []
 ucx-integration = ["dep:ucx-sys"]

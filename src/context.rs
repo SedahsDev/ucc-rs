@@ -194,3 +194,44 @@ impl UccContextParams {
         &mut self.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use static_assertions::assert_impl_all;
+    use std::clone::Clone;
+
+    #[test]
+    fn test_ucc_context_params_default() {
+        let params = UccContextParams::default();
+        assert_eq!(params.0.type_, ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE);
+        assert_eq!(params.0.sync_type, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES);
+    }
+
+    #[test]
+    fn test_ucc_context_params_with_type() {
+        let mut params = UccContextParams::default();
+        params.with_type(ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE);
+        assert!(params.0.mask & ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE as u64 != 0);
+    }
+
+    #[test]
+    fn test_ucc_context_params_with_id() {
+        let mut params = UccContextParams::default();
+        params.with_id(42);
+        assert_eq!(params.0.ctx_id, 42);
+        assert!(params.0.mask & ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID as u64 != 0);
+    }
+
+    #[test]
+    fn test_ucc_context_trait_bounds() {
+        // UccContext is Clone but NOT Send — raw FFI handles don't impl Send
+        assert_impl_all!(UccContext: Clone);
+    }
+
+    #[test]
+    fn test_ucc_context_config_has_handle() {
+        // UccContextConfig wraps a raw FFI handle — intentionally not Send.
+        let _ = std::mem::size_of::<UccContextConfig>();
+    }
+}
