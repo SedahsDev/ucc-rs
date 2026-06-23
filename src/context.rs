@@ -5,9 +5,10 @@
 
 use crate::bindings::{
     ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
-    ucc_context_config_h, ucc_context_config_read, ucc_context_config_release,
-    ucc_context_create, ucc_context_destroy, ucc_context_h, ucc_context_params,
-    ucc_context_type_t, ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
+    ucc_context_config_h, ucc_context_config_modify, ucc_context_config_print,
+    ucc_context_config_read, ucc_context_config_release, ucc_context_create,
+    ucc_context_destroy, ucc_context_get_attr, ucc_context_h, ucc_context_params,
+    ucc_context_progress, ucc_context_type_t, ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE,
@@ -37,6 +38,51 @@ impl UccContextConfig {
         };
         check_status(status)?;
         Ok(Self { handle: config })
+    }
+
+    /// Print the context configuration to stdout.
+    ///
+    /// Useful for debugging — dumps all configuration key-value pairs.
+    pub fn print(&self) {
+        use std::ffi::CString;
+        let title = CString::new("UCC Context Configuration").unwrap_or_default();
+        unsafe {
+            // Safety: config handle is valid, stdout is a valid FILE*, title is a valid C string.
+            ucc_context_config_print(
+                self.handle,
+                std::ptr::null_mut(), // stream — config print is debug-only
+                title.as_ptr(),
+                0, // UCC_CONFIG_PRINT_ALL
+            );
+        }
+    }
+
+    /// Modify a configuration key-value pair.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ucc::{lib_init::UccLib, context::UccContextConfig};
+    /// # let lib = UccLib::init().unwrap();
+    /// let config = UccContextConfig::read(&lib).unwrap();
+    /// config.modify("IB_GID_INDEX", "0").unwrap();
+    /// ```
+    pub fn modify(&self, name: &str, value: &str) -> Result<(), UccStatus> {
+        use std::ffi::CString;
+        let c_name = CString::new(name).map_err(|_| UccStatus::Unknown(-1))?;
+        let c_value = CString::new(value).map_err(|_| UccStatus::Unknown(-1))?;
+        let status = unsafe {
+            // Safety: config handle, name, and value are valid C strings.
+            // ucc_context_config_modify takes 4 args: (config, component, name, value)
+            // component = NULL means use the default component
+            ucc_context_config_modify(
+                self.handle,
+                std::ptr::null(),
+                c_name.as_ptr(),
+                c_value.as_ptr(),
+            )
+        };
+        check_status(status)
     }
 
     /// Get the raw config handle.
@@ -113,6 +159,47 @@ impl UccContext {
     pub fn handle(&self) -> ucc_context_h {
         self.handle
     }
+
+    /// Query context attributes.
+    ///
+    /// Returns a [`UccContextAttrs`] struct containing the requested attributes.
+    /// Use the `mask` parameter to specify which attributes to query.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ucc::{lib_init::UccLib, context::{UccContext, UccContextAttrField}};
+    /// # let ctx = UccContext::new(UccLib::init().unwrap()).unwrap();
+    /// let attrs = ctx.get_attr(
+    ///     UccContextAttrField::TYPE | UccContextAttrField::SYNC_TYPE
+    /// ).unwrap();
+    /// println!("Context type: {}", attrs.context_type());
+    /// ```
+    #[must_use = "Result should be checked"]
+    pub fn get_attr(&self, mask: u64) -> Result<UccContextAttrs, UccStatus> {
+        let mut attr: crate::bindings::ucc_context_attr_t = unsafe {
+            // Safety: ucc_context_attr_t is a POD struct with no pointers requiring initialization.
+            std::mem::zeroed()
+        };
+        attr.mask = mask;
+        let status = unsafe {
+            // Safety: self.handle is a valid context handle and &mut attr is a valid pointer.
+            ucc_context_get_attr(self.handle, &mut attr)
+        };
+        check_status(status)?;
+        Ok(UccContextAttrs(attr))
+    }
+
+    /// Progress the context.
+    ///
+    /// Calls `ucc_context_progress` to make progress on any pending operations.
+    /// This is a blocking call that may perform network I/O.
+    pub fn progress(&self) {
+        unsafe {
+            // Safety: self.handle is a valid context handle.
+            ucc_context_progress(self.handle);
+        }
+    }
 }
 
 impl Drop for UccContext {
@@ -126,6 +213,72 @@ impl Drop for UccContext {
             }
             self.handle = std::ptr::null_mut();
         }
+    }
+}
+
+/// Context attributes returned by [`UccContext::get_attr`].
+///
+/// Wraps `ucc_context_attr_t` and provides safe accessors for each field.
+/// Only fields requested via the mask in `get_attr()` are guaranteed valid.
+#[must_use = "Context attributes contain useful runtime information"]
+pub struct UccContextAttrs(crate::bindings::ucc_context_attr_t);
+
+impl UccContextAttrs {
+    /// Get the context type.
+    pub fn context_type(&self) -> ucc_context_type_t {
+        self.0.type_
+    }
+
+    /// Get the collective sync type.
+    pub fn sync_type(&self) -> ucc_coll_sync_type_t {
+        self.0.sync_type
+    }
+
+    /// Get the context address (for OOB discovery).
+    pub fn ctx_addr(&self) -> *mut libc::c_void {
+        self.0.ctx_addr
+    }
+
+    /// Get the context address length.
+    pub fn ctx_addr_len(&self) -> usize {
+        self.0.ctx_addr_len as usize
+    }
+
+    /// Get the global work buffer size.
+    pub fn global_work_buffer_size(&self) -> u64 {
+        self.0.global_work_buffer_size
+    }
+
+    /// Get the raw mask indicating which fields are valid.
+    pub fn mask(&self) -> u64 {
+        self.0.mask
+    }
+}
+
+/// Bitmask for UCC context attribute fields.
+///
+/// Use these flags with [`UccContext::get_attr`] to specify which attributes to query.
+/// Combine with bitwise OR (e.g., `TYPE | SYNC_TYPE`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct UccContextAttrField(u64);
+
+impl UccContextAttrField {
+    /// Context type attribute.
+    pub const TYPE: Self = Self(1);
+    /// Collective sync type attribute.
+    pub const SYNC_TYPE: Self = Self(2);
+    /// Context address attribute.
+    pub const CTX_ADDR: Self = Self(4);
+    /// Context address length attribute.
+    pub const CTX_ADDR_LEN: Self = Self(8);
+    /// Work buffer size attribute.
+    pub const WORK_BUFFER_SIZE: Self = Self(16);
+}
+
+impl std::ops::BitOr for UccContextAttrField {
+    type Output = u64;
+    fn bitor(self, rhs: Self) -> u64 {
+        self.0 | rhs.0
     }
 }
 
