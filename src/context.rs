@@ -4,13 +4,47 @@
 //! It wraps the underlying UCX context for the `tl/ucp` transport.
 
 use crate::bindings::{
-    ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_create,
+    ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_config_h,
+    ucc_context_config_read, ucc_context_config_release, ucc_context_create,
     ucc_context_destroy, ucc_context_h, ucc_context_params, ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE, ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
 };
 use crate::lib_init::UccLib;
-use crate::status::{check_status, UccStatus};
+use crate::status::{check_status, UccError, UccStatus};
+
+/// UCC context config handle with RAII cleanup.
+pub struct UccContextConfig {
+    handle: ucc_context_config_h,
+}
+
+impl UccContextConfig {
+    /// Read the UCC context configuration from environment variables.
+    pub fn read(lib: &UccLib) -> Result<Self, UccStatus> {
+        let mut config: ucc_context_config_h = std::ptr::null_mut();
+        let status = unsafe {
+            ucc_context_config_read(lib.handle(), std::ptr::null(), &mut config)
+        };
+        check_status(status)?;
+        Ok(Self { handle: config })
+    }
+
+    /// Get the raw config handle.
+    pub fn handle(&self) -> ucc_context_config_h {
+        self.handle
+    }
+}
+
+impl Drop for UccContextConfig {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe {
+                ucc_context_config_release(self.handle);
+            }
+            self.handle = std::ptr::null_mut();
+        }
+    }
+}
 
 /// UCC context handle with RAII cleanup.
 #[derive(Clone)]
@@ -27,20 +61,25 @@ impl UccContext {
 
     /// Create a new context with custom parameters.
     pub fn with_params(lib: UccLib, ctx_params: UccContextParams) -> Result<Self, UccStatus> {
+        // Must create a context config before creating the context.
+        // ucc_context_create dereferences the config pointer internally,
+        // so passing NULL causes a segfault.
+        let config = UccContextConfig::read(&lib)?;
         let lib_handle = lib.handle();
         let mut context: ucc_context_h = std::ptr::null_mut();
         let status = unsafe {
             ucc_context_create(
                 lib_handle,
                 &ctx_params.0,
-                std::ptr::null_mut(),
+                config.handle(),
                 &mut context,
             )
         };
         check_status(status)?;
         if context.is_null() {
-            return Err(UccStatus(-5)); // UCC_ERR_NO_RESOURCE
+            return Err(UccStatus::Known(UccError::ErrNoResource));
         }
+        // config is dropped here, releasing the context config handle
         Ok(Self {
             handle: context,
             _lib: lib,

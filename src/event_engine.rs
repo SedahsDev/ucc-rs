@@ -8,7 +8,7 @@ use crate::bindings::{
     ucc_event_type_UCC_EVENT_COLLECTIVE_POST,
 };
 use crate::team::UccTeam;
-use crate::status::{check_status, UccStatus};
+use crate::status::{check_status, UccError, UccStatus};
 
 /// UCC Execution Engine handle with RAII cleanup.
 pub struct UccExecutionEngine {
@@ -25,7 +25,7 @@ impl UccExecutionEngine {
         let status = unsafe { ucc_ee_create(team_handle, &ee_params, &mut ee) };
         check_status(status)?;
         if ee.is_null() {
-            return Err(UccStatus(-5));
+            return Err(UccStatus::Known(UccError::ErrNoResource));
         }
         Ok(Self {
             handle: ee,

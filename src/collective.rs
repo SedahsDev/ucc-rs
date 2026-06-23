@@ -44,7 +44,7 @@ use crate::bindings::{
     ucc_reduction_op_t_UCC_OP_PROD,
     ucc_reduction_op_t_UCC_OP_SUM,
 };
-use crate::status::{check_status, UccStatus};
+use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
 
 /// Reduction operations for collective operations.
@@ -114,26 +114,34 @@ pub struct UccCollRequest {
 impl UccCollRequest {
     /// Test if the collective operation has completed.
     /// Returns true if complete, false if still in progress.
+    /// Note: Does NOT finalize the request — caller must call wait() or finalize manually.
     pub fn test(&mut self) -> Result<bool, UccStatus> {
         if self.handle.is_null() {
             return Ok(true);
         }
-        let status = unsafe { ucc_collective_post(self.handle) };
+        // ucc_collective_test is a static inline in C: return request->status;
+        let status = unsafe { (*self.handle).status };
         if status == 1 {
             // UCC_INPROGRESS
             Ok(false)
         } else if status == 0 {
             // UCC_OK
-            self.handle = std::ptr::null_mut();
             Ok(true)
         } else {
-            Err(UccStatus(status))
+            Err(UccStatus::from_raw(status))
         }
     }
 
     /// Wait for the collective operation to complete.
     pub fn wait(&mut self) -> Result<(), UccStatus> {
         while !self.test()? {}
+        // Finalize the collective request after successful completion
+        if !self.handle.is_null() {
+            unsafe {
+                ucc_collective_finalize(self.handle);
+                self.handle = std::ptr::null_mut();
+            }
+        }
         Ok(())
     }
 
@@ -257,7 +265,7 @@ impl<'a> CollectiveBuilder<'a> {
         check_status(status)?;
 
         if req.is_null() {
-            return Err(UccStatus(-5)); // UCC_ERR_NO_RESOURCE
+            return Err(UccStatus::Known(UccError::ErrNoResource));
         }
 
         let status = unsafe { ucc_collective_post(req) };

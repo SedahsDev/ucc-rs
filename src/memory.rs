@@ -7,7 +7,7 @@ use crate::bindings::{
     ucc_mem_map_mode_t_UCC_MEM_MAP_MODE_EXPORT,
 };
 use crate::context::UccContext;
-use crate::status::{check_status, UccStatus};
+use crate::status::{check_status, UccError, UccStatus};
 
 /// Memory handle with RAII cleanup.
 pub struct UccMemHandle {
@@ -48,7 +48,7 @@ impl UccMemHandle {
         };
         check_status(status)?;
         if memh.is_null() {
-            return Err(UccStatus(-5));
+            return Err(UccStatus::Known(UccError::ErrNoResource));
         }
         Ok(Self { memh, mapped_len: length })
     }

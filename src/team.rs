@@ -23,7 +23,7 @@ use crate::bindings::{
     ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE,
 };
 use crate::context::UccContext;
-use crate::status::{check_status, UccStatus};
+use crate::status::{check_status, UccError, UccStatus};
 
 /// UCC team handle with RAII cleanup.
 pub struct UccTeam {
@@ -50,7 +50,7 @@ impl UccTeam {
         };
         check_status(status)?;
         if team.is_null() {
-            return Err(UccStatus(-5)); // UCC_ERR_NO_RESOURCE
+            return Err(UccStatus::Known(UccError::ErrNoResource));
         }
         // Two-phase: test until team creation completes
         loop {

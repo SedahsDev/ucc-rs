@@ -1,19 +1,26 @@
-// ucc-rs: Safe Rust bindings for UCC (Unified Collective Communication)
-//
-// UCC provides native collective operations built on top of UCX.
-// This crate provides both FFI bindings (auto-generated via bindgen) and
-// safe Rust wrappers with RAII lifetime management.
+//! ucc-rs — Safe Rust bindings for the Unified Collective Communication (UCC) library.
+//!
+//! This crate provides idiomatic Rust wrappers around the UCC C API with:
+//! * RAII resource management (auto-cleanup on drop)
+//! * Type-safe enums for status codes, collectives, and datatypes
+//! * Builder patterns for collective operations
+//!
+//! # Quick Start
+//!
+//! ```no_run
+//! use ucc_rs::UccLib;
+//!
+//! let lib = UccLib::init().unwrap();
+//! // lib is automatically finalized when dropped
+//! ```
 
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
-
-// Auto-generated FFI bindings (written to src/bindings.rs by build.rs)
-#[path = "bindings.rs"]
+// Auto-generated FFI bindings from ucc.h
 mod bindings;
-pub use bindings::*;
 
-// Safe wrapper modules
+// Re-export status types at crate root for ergonomic access
+pub use status::{check_status, UccError, UccStatus};
+
+// Core modules
 pub mod collective;
 pub mod context;
 pub mod event_engine;
@@ -21,9 +28,3 @@ pub mod lib_init;
 pub mod memory;
 pub mod status;
 pub mod team;
-
-// Re-export commonly used types for convenience
-pub use bindings::{
-    ucc_coll_sync_type_t, ucc_coll_type_t, ucc_post_ordering_t, ucc_reduction_op_t,
-    ucc_thread_mode_t, ucc_status_t,
-};
