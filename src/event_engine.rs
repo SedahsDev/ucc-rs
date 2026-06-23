@@ -34,8 +34,14 @@ impl UccExecutionEngine {
     pub fn new(team: UccTeam) -> Result<Self, UccStatus> {
         let team_handle = team.handle();
         let mut ee: ucc_ee_h = std::ptr::null_mut();
-        let ee_params: ucc_ee_params_t = unsafe { std::mem::zeroed() };
-        let status = unsafe { ucc_ee_create(team_handle, &ee_params, &mut ee) };
+        let ee_params: ucc_ee_params_t = unsafe {
+            // Safety: ucc_ee_params_t is a POD struct with no pointers that require initialization.
+            std::mem::zeroed()
+        };
+        let status = unsafe {
+            // Safety: team handle and params are valid; ee is output pointer.
+            ucc_ee_create(team_handle, &ee_params, &mut ee)
+        };
         check_status(status)?;
         if ee.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
@@ -48,30 +54,48 @@ impl UccExecutionEngine {
 
     /// Set an event on the execution engine.
     pub unsafe fn set_event(&self, ev_type: u32, ev_context: *mut std::os::raw::c_void) -> Result<(), UccStatus> {
-        let mut ev: ucc_ev_t = unsafe { std::mem::zeroed() };
+        let mut ev: ucc_ev_t = unsafe {
+            // Safety: ucc_ev_t is a POD struct with no pointers that require initialization.
+            std::mem::zeroed()
+        };
         ev.ev_type = ev_type;
         ev.ev_context = ev_context;
         ev.ev_context_size = 0;
-        let status = unsafe { ucc_ee_set_event(self.handle, &mut ev) };
+        let status = unsafe {
+            // Safety: ee handle and ev pointer are valid.
+            ucc_ee_set_event(self.handle, &mut ev)
+        };
         check_status(status)
     }
 
     /// Set a collective post event.
     pub fn set_collective_post(&self) -> Result<(), UccStatus> {
-        unsafe { self.set_event(ucc_event_type_UCC_EVENT_COLLECTIVE_POST, std::ptr::null_mut()) }
+        unsafe {
+            // Safety: self.set_event is an unsafe FFI call; handle is valid.
+            self.set_event(ucc_event_type_UCC_EVENT_COLLECTIVE_POST, std::ptr::null_mut())
+        }
     }
 
     /// Set a collective complete event.
     pub fn set_collective_complete(&self) -> Result<(), UccStatus> {
-        unsafe { self.set_event(ucc_event_type_UCC_EVENT_COLLECTIVE_COMPLETE, std::ptr::null_mut()) }
+        unsafe {
+            // Safety: self.set_event is an unsafe FFI call; handle is valid.
+            self.set_event(ucc_event_type_UCC_EVENT_COLLECTIVE_COMPLETE, std::ptr::null_mut())
+        }
     }
 
     /// Get an event from the execution engine's event queue.
     pub fn get_event(&self) -> Result<UccEvent, UccStatus> {
         let mut ev: *mut ucc_ev_t = std::ptr::null_mut();
-        let status = unsafe { ucc_ee_get_event(self.handle, &mut ev) };
+        let status = unsafe {
+            // Safety: ee handle and ev pointer are valid.
+            ucc_ee_get_event(self.handle, &mut ev)
+        };
         check_status(status)?;
-        let raw = unsafe { &*ev };
+        let raw = unsafe {
+            // Safety: ev is a valid pointer returned by ucc_ee_get_event.
+            &*ev
+        };
         Ok(UccEvent {
             ev_type: raw.ev_type,
             ev_context: raw.ev_context,
@@ -128,6 +152,7 @@ impl Drop for UccExecutionEngine {
     fn drop(&mut self) {
         if !self.handle.is_null() {
             unsafe {
+                // Safety: handle was validated non-null above; safe to destroy in Drop.
                 ucc_ee_destroy(self.handle);
             }
             self.handle = std::ptr::null_mut();

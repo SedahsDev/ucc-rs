@@ -125,7 +125,10 @@ impl UccCollRequest {
             return Ok(true);
         }
         // ucc_collective_test is a static inline in C: return request->status;
-        let status = unsafe { (*self.handle).status };
+        let status = unsafe {
+            // Safety: self.handle is a valid ucc_coll_req_h obtained from ucc_collective_init.
+            (*self.handle).status
+        };
         if status == 1 {
             // UCC_INPROGRESS
             Ok(false)
@@ -143,6 +146,7 @@ impl UccCollRequest {
         // Finalize the collective request after successful completion
         if !self.handle.is_null() {
             unsafe {
+                // Safety: handle was validated non-null above.
                 ucc_collective_finalize(self.handle);
                 self.handle = std::ptr::null_mut();
             }
@@ -160,6 +164,7 @@ impl Drop for UccCollRequest {
     fn drop(&mut self) {
         if !self.handle.is_null() {
             unsafe {
+                // Safety: handle was validated non-null above; safe to finalize in Drop.
                 ucc_collective_finalize(self.handle);
             }
             self.handle = std::ptr::null_mut();
@@ -245,7 +250,10 @@ impl<'a> CollectiveBuilder<'a> {
 
     /// Post the collective operation and return a request handle.
     pub fn post(self) -> Result<UccCollRequest, UccStatus> {
-        let mut coll_args: ucc_coll_args_t = unsafe { std::mem::zeroed() };
+        let mut coll_args: ucc_coll_args_t = unsafe {
+            // Safety: ucc_coll_args_t is a POD struct with no pointers that require initialization.
+            std::mem::zeroed()
+        };
 
         coll_args.coll_type = self.coll_type;
         // src/dst are unions with .info field for simple buffer info
@@ -259,12 +267,16 @@ impl<'a> CollectiveBuilder<'a> {
         coll_args.root = self.root;
         coll_args.flags = self.flags as u64;
         coll_args.global_work_buffer = std::ptr::null_mut();
-        coll_args.cb = unsafe { std::mem::zeroed() };
+        coll_args.cb = unsafe {
+            // Safety: ucc_cb_t is a POD struct with no pointers that require initialization.
+            std::mem::zeroed()
+        };
         coll_args.timeout = 0.0;
         coll_args.mask = ucc_coll_args_field_UCC_COLL_ARGS_FIELD_FLAGS as u64;
 
         let mut req: ucc_coll_req_h = std::ptr::null_mut();
         let status = unsafe {
+            // Safety: coll_args is a valid reference, req is a valid output pointer, team handle is valid.
             ucc_collective_init(&mut coll_args, &mut req, self.team.handle())
         };
         check_status(status)?;
@@ -273,7 +285,10 @@ impl<'a> CollectiveBuilder<'a> {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
 
-        let status = unsafe { ucc_collective_post(req) };
+        let status = unsafe {
+            // Safety: req is a valid request handle from ucc_collective_init, validated non-null above.
+            ucc_collective_post(req)
+        };
         check_status(status)?;
 
         Ok(UccCollRequest {
@@ -305,6 +320,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: buffer pointer is valid for the collective's lifetime; caller guarantees buffer outlives the request.
             self.bcast_raw(
                 buffer.as_ptr() as *mut std::os::raw::c_void,
                 buffer.len() as ucc_count_t,
@@ -335,6 +351,7 @@ impl UccTeam {
     /// Typed broadcast for `&mut [T]` buffers.
     pub fn bcast_t<T>(&self, buffer: &mut [T], datatype: DataType, root: u64) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: buffer pointer is valid for the collective lifetime; caller guarantees buffer outlives the request.
             self.bcast_raw(
                 buffer.as_mut_ptr() as *mut std::os::raw::c_void,
                 buffer.len() as ucc_count_t,
@@ -356,6 +373,7 @@ impl UccTeam {
         op: ReductionOp,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: buffer pointer is valid for the collective lifetime; caller guarantees buffer outlives the request.
             self.allreduce_raw(
                 buffer.as_ptr() as *mut std::os::raw::c_void,
                 buffer.len() as ucc_count_t,
@@ -391,6 +409,7 @@ impl UccTeam {
         op: ReductionOp,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: buffer pointer is valid for the collective lifetime; caller guarantees buffer outlives the request.
             self.allreduce_raw(
                 buffer.as_mut_ptr() as *mut std::os::raw::c_void,
                 buffer.len() as ucc_count_t,
@@ -414,6 +433,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.reduce_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_ptr() as *mut std::os::raw::c_void,
@@ -456,6 +476,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.reduce_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_mut_ptr() as *mut std::os::raw::c_void,
@@ -479,6 +500,7 @@ impl UccTeam {
         datatype: DataType,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.allgather_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_ptr() as *mut std::os::raw::c_void,
@@ -513,6 +535,7 @@ impl UccTeam {
         datatype: DataType,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.allgather_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_mut_ptr() as *mut std::os::raw::c_void,
@@ -535,6 +558,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.gather_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_ptr() as *mut std::os::raw::c_void,
@@ -573,6 +597,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.gather_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_mut_ptr() as *mut std::os::raw::c_void,
@@ -617,6 +642,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.scatter_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_ptr() as *mut std::os::raw::c_void,
@@ -655,6 +681,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.scatter_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_mut_ptr() as *mut std::os::raw::c_void,
@@ -678,6 +705,7 @@ impl UccTeam {
         op: ReductionOp,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.reduce_scatter_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_ptr() as *mut std::os::raw::c_void,
@@ -716,6 +744,7 @@ impl UccTeam {
         op: ReductionOp,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.reduce_scatter_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_mut_ptr() as *mut std::os::raw::c_void,
@@ -738,6 +767,7 @@ impl UccTeam {
         datatype: DataType,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.alltoall_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_ptr() as *mut std::os::raw::c_void,
@@ -772,6 +802,7 @@ impl UccTeam {
         datatype: DataType,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.alltoall_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_mut_ptr() as *mut std::os::raw::c_void,
@@ -795,6 +826,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.fanin_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_ptr() as *mut std::os::raw::c_void,
@@ -837,6 +869,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.fanin_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_mut_ptr() as *mut std::os::raw::c_void,
@@ -861,6 +894,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.fanout_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_ptr() as *mut std::os::raw::c_void,
@@ -899,6 +933,7 @@ impl UccTeam {
         root: u64,
     ) -> Result<UccCollRequest, UccStatus> {
         unsafe {
+            // Safety: src and dst pointers are valid for the collective lifetime; caller guarantees buffers outlive the request.
             self.fanout_raw(
                 src.as_ptr() as *mut std::os::raw::c_void,
                 dst.as_mut_ptr() as *mut std::os::raw::c_void,

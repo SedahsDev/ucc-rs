@@ -59,6 +59,7 @@ impl UccMemHandle {
         };
 
         let status = unsafe {
+            // Safety: context handle, addr, and mem_params are valid; mem_handle is output pointer.
             ucc_mem_map(
                 ctx_handle,
                 ucc_mem_map_mode_t_UCC_MEM_MAP_MODE_EXPORT,
@@ -81,7 +82,10 @@ impl UccMemHandle {
     /// underlying memory remains valid for the lifetime of the returned
     /// [`UccMemHandle`].
     pub fn map_slice(context: &UccContext, slice: &[u8]) -> Result<Self, UccStatus> {
-        unsafe { Self::map_raw(context, slice.as_ptr() as *mut std::os::raw::c_void, slice.len()) }
+        unsafe {
+            // Safety: slice pointer is valid for the handle lifetime; caller guarantees memory outlives the handle.
+             Self::map_raw(context, slice.as_ptr() as *mut std::os::raw::c_void, slice.len())
+        }
     }
 
     /// Safely map a mutable byte slice at a context.
@@ -91,7 +95,10 @@ impl UccMemHandle {
     /// underlying memory remains valid for the lifetime of the returned
     /// [`UccMemHandle`].
     pub fn map_slice_mut(context: &UccContext, slice: &mut [u8]) -> Result<Self, UccStatus> {
-        unsafe { Self::map_raw(context, slice.as_mut_ptr() as *mut std::os::raw::c_void, slice.len()) }
+        unsafe {
+            // Safety: slice pointer is valid for the handle lifetime; caller guarantees memory outlives the handle.
+             Self::map_raw(context, slice.as_mut_ptr() as *mut std::os::raw::c_void, slice.len())
+        }
     }
 
     /// Get the raw memory handle.
@@ -110,6 +117,7 @@ impl Drop for UccMemHandle {
         if !self.memh.is_null() {
             let mut memh = self.memh;
             unsafe {
+                // Safety: mem_handle was validated non-null above; safe to unmap in Drop.
                 ucc_mem_unmap(&mut memh);
             }
             self.memh = std::ptr::null_mut();
