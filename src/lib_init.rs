@@ -16,7 +16,7 @@ use crate::bindings::{
     ucc_thread_mode_t_UCC_THREAD_SINGLE,
     ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
 };
-use crate::status::{check_status, UccError, UccStatus};
+use crate::status::{check_status, UccStatus};
 
 /// UCC library config handle with RAII cleanup.
 ///

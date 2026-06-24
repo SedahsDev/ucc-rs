@@ -9,7 +9,6 @@ use crate::bindings::{
     ucc_context_config_read, ucc_context_config_release, ucc_context_create,
     ucc_context_destroy, ucc_context_get_attr, ucc_context_h, ucc_context_params,
     ucc_context_progress, ucc_context_type_t, ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
-    ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE,
 };
@@ -351,6 +350,7 @@ impl UccContextParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bindings::ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID;
     use static_assertions::assert_impl_all;
     use std::clone::Clone;
 

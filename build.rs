@@ -32,6 +32,8 @@ fn main() {
         .raw_line("#![allow(non_snake_case)]")
         .raw_line("#![allow(dead_code)]")
         .raw_line("#![allow(clippy::all)]")
+        .raw_line("#![allow(unused_unsafe)]")
+        .raw_line("#![allow(unnecessary_transmutes)]")
         .generate()
         .expect("Unable to generate UCC bindings");
 

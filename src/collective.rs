@@ -4,7 +4,7 @@
 //! operations (allreduce, broadcast, allgather, reduce, barrier, etc.).
 
 use crate::bindings::{
-    ucc_coll_args, ucc_coll_args_flags_t, ucc_coll_buffer_info, ucc_coll_callback,
+    ucc_coll_args, ucc_coll_callback,
     ucc_coll_id_t, ucc_coll_req_h, ucc_coll_type_t,
     ucc_coll_type_t_UCC_COLL_TYPE_ALLGATHER, ucc_coll_type_t_UCC_COLL_TYPE_ALLREDUCE,
     ucc_coll_type_t_UCC_COLL_TYPE_BARRIER, ucc_coll_type_t_UCC_COLL_TYPE_BCAST,
@@ -12,15 +12,14 @@ use crate::bindings::{
     ucc_coll_type_t_UCC_COLL_TYPE_SCATTERV, ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALLV,
     ucc_coll_type_t_UCC_COLL_TYPE_GATHERV, ucc_coll_type_t_UCC_COLL_TYPE_FANIN,
     ucc_coll_type_t_UCC_COLL_TYPE_FANOUT, ucc_coll_type_t_UCC_COLL_TYPE_GATHER,
-    ucc_coll_type_t_UCC_COLL_TYPE_SCATTER, ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALL,
-    ucc_coll_type_t_UCC_COLL_TYPE_LAST, ucc_count_t, ucc_datatype_t,
-    ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_t, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
+    ucc_coll_type_t_UCC_COLL_TYPE_SCATTER, ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALL, ucc_datatype_t,
+    ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
     ucc_reduction_op_t, ucc_reduction_op_t_UCC_OP_SUM,
     ucc_reduction_op_t_UCC_OP_MAX, ucc_reduction_op_t_UCC_OP_MIN,
     ucc_reduction_op_t_UCC_OP_PROD, ucc_reduction_op_t_UCC_OP_LAND,
     ucc_reduction_op_t_UCC_OP_LOR, ucc_reduction_op_t_UCC_OP_LXOR,
     ucc_reduction_op_t_UCC_OP_BAND, ucc_reduction_op_t_UCC_OP_BOR,
-    ucc_reduction_op_t_UCC_OP_BXOR, ucc_team_h,
+    ucc_reduction_op_t_UCC_OP_BXOR,
     ucc_collective_finalize, ucc_collective_init, ucc_collective_init_and_post,
     ucc_collective_post, ucc_collective_triggered_post,
 };
