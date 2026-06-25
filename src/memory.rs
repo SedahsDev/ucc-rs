@@ -142,3 +142,76 @@ impl Drop for UccMemHandle {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lib_init::UccLib;
+
+    // ── Integration tests (call into libucc.so) ────────────────────────────
+
+    mod integration_tests {
+        use super::*;
+
+        #[test]
+        fn integration_mem_map_slice() {
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let data: [u8; 256] = [42; 256];
+            let handle = UccMemHandle::map_slice(&ctx, &data).expect("map_slice should succeed");
+            assert_eq!(
+                handle.mapped_len(),
+                256,
+                "mapped_len should match slice length"
+            );
+            assert!(
+                !handle.handle().is_null(),
+                "memory handle should be non-null"
+            );
+            // handle dropped here — ucc_mem_unmap called automatically
+        }
+
+        #[test]
+        fn integration_mem_map_slice_mut() {
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let mut data = vec![0u8; 512];
+            let handle =
+                UccMemHandle::map_slice_mut(&ctx, &mut data).expect("map_slice_mut should succeed");
+            assert_eq!(
+                handle.mapped_len(),
+                512,
+                "mapped_len should match slice length"
+            );
+            // handle dropped here
+        }
+
+        #[test]
+        fn integration_mem_map_multiple_regions() {
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let data1: [u8; 64] = [1; 64];
+            let data2: [u8; 128] = [2; 128];
+            let handle1 =
+                UccMemHandle::map_slice(&ctx, &data1).expect("map_slice #1 should succeed");
+            let handle2 =
+                UccMemHandle::map_slice(&ctx, &data2).expect("map_slice #2 should succeed");
+            assert_eq!(handle1.mapped_len(), 64);
+            assert_eq!(handle2.mapped_len(), 128);
+            // Both handles dropped here
+        }
+
+        #[test]
+        fn integration_mem_map_empty_slice() {
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let data: [u8; 0] = [];
+            // Mapping zero-length may succeed or fail depending on UCC version;
+            // we just verify it doesn't crash either way.
+            let result = UccMemHandle::map_slice(&ctx, &data);
+            if let Ok(handle) = result {
+                assert_eq!(handle.mapped_len(), 0);
+            }
+        }
+    }
+}

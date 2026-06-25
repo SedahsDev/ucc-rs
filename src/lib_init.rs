@@ -99,15 +99,30 @@ impl Drop for UccLibConfig {
     }
 }
 
+/// Internal shared state for UccLib — Rc-backed so clones share the
+/// same C handle and `ucc_finalize` is called exactly once.
+/// Note: UCC handles are thread-local by design, so `Rc` (not `Arc`) is correct.
+struct UccLibInner {
+    handle: ucc_lib_h,
+}
+
 /// UCC library handle with RAII cleanup.
 ///
 /// Represents an initialized UCC library instance. Automatically calls
 /// `ucc_finalize` on drop, releasing all associated resources.
-/// Cloneable — each clone shares the same underlying C handle.
+/// Cloneable — each clone shares the same underlying C handle via `Rc`,
+/// so `ucc_finalize` is called exactly once when the last clone is dropped.
 #[must_use = "Library handles should be kept alive or explicitly dropped"]
-#[derive(Clone)]
 pub struct UccLib {
-    handle: ucc_lib_h,
+    inner: std::rc::Rc<UccLibInner>,
+}
+
+impl Clone for UccLib {
+    fn clone(&self) -> Self {
+        Self {
+            inner: std::rc::Rc::clone(&self.inner),
+        }
+    }
 }
 
 impl UccLib {
@@ -133,12 +148,14 @@ impl UccLib {
         };
         check_status(status)?;
         // config is dropped here, releasing the config handle
-        Ok(Self { handle: lib })
+        Ok(Self {
+            inner: std::rc::Rc::new(UccLibInner { handle: lib }),
+        })
     }
 
     /// Get a raw handle for use with lower-level APIs.
     pub fn handle(&self) -> ucc_lib_h {
-        self.handle
+        self.inner.handle
     }
 
     /// Query library attributes.
@@ -164,8 +181,8 @@ impl UccLib {
         };
         attr.mask = mask;
         let status = unsafe {
-            // Safety: self.handle is a valid lib handle and &mut attr is a valid pointer.
-            ucc_lib_get_attr(self.handle, &mut attr)
+            // Safety: self.inner.handle is a valid lib handle and &mut attr is a valid pointer.
+            ucc_lib_get_attr(self.inner.handle, &mut attr)
         };
         check_status(status)?;
         Ok(UccLibAttrs(attr))
@@ -174,14 +191,17 @@ impl UccLib {
 
 impl Drop for UccLib {
     fn drop(&mut self) {
-        if !self.handle.is_null() {
-            // Safety: handle was validated non-null above and the C function only
-            // dereferences the handle pointer for cleanup. Handle is nulled after
-            // to prevent double-free.
+        // Rc ensures ucc_finalize is called exactly once — when the last
+        // UccLib clone is dropped. We also null the handle to guard against
+        // any edge case, though Rc::drop handles this correctly.
+        let handle = std::rc::Rc::get_mut(&mut self.inner)
+            .map(|inner| std::mem::replace(&mut inner.handle, std::ptr::null_mut()))
+            .filter(|h| !h.is_null());
+        if let Some(h) = handle {
             unsafe {
-                ucc_finalize(self.handle);
+                // Safety: handle was validated non-null and is a valid lib handle.
+                ucc_finalize(h);
             }
-            self.handle = std::ptr::null_mut();
         }
     }
 }
@@ -424,7 +444,177 @@ mod tests {
     #[test]
     fn test_ucc_lib_config_has_handle() {
         // UccLibConfig wraps a raw FFI handle — intentionally not Send.
-        // We just verify the struct has the expected field.
         let _ = std::mem::size_of::<UccLibConfig>();
+    }
+
+    // ── Integration tests (call into libucc.so) ────────────────────────────
+
+    mod integration_tests {
+        use super::*;
+        use crate::UccError;
+
+        #[test]
+        fn integration_lib_init_and_drop() {
+            // Verify UccLib::init() succeeds and drop auto-finalizes.
+            let lib = UccLib::init().expect("UccLib::init() should succeed");
+            let handle = lib.handle();
+            assert!(
+                !handle.is_null(),
+                "Library handle must be non-null after init"
+            );
+            // lib dropped here — ucc_finalize called automatically
+        }
+
+        #[test]
+        fn integration_lib_init_twice() {
+            // Verify we can init/finalize multiple times in sequence.
+            for _ in 0..3 {
+                let lib = UccLib::init().expect("UccLib::init() should succeed on re-init");
+                assert!(!lib.handle().is_null());
+                // drop
+            }
+        }
+
+        #[test]
+        fn integration_lib_clone() {
+            // Verify UccLib::clone() works. Keep the original alive so both
+            // clones share the same handle and only one drop actually finalizes.
+            let lib = UccLib::init().expect("init");
+            let _clone = lib.clone();
+            assert!(!lib.handle().is_null());
+            // lib dropped last — only its drop calls ucc_finalize
+        }
+
+        #[test]
+        fn integration_version_query() {
+            let (major, minor, release) = ucc_version();
+            assert!(major > 0, "UCC major version should be > 0, got {}", major);
+            // minor and release can be 0, so no lower-bound assertion there
+            let _ = minor;
+            let _ = release;
+        }
+
+        #[test]
+        fn integration_version_string() {
+            let vs = ucc_version_string();
+            assert!(!vs.is_empty(), "Version string should not be empty");
+            assert!(
+                vs.contains('.'),
+                "Version string should contain dots, got: {}",
+                vs
+            );
+        }
+
+        #[test]
+        fn integration_status_string_ok() {
+            let status = UccStatus::Known(UccError::Ok);
+            let s = ucc_status_string(status);
+            assert!(
+                s.contains("OK"),
+                "Status string for OK should contain 'OK', got: {}",
+                s
+            );
+        }
+
+        #[test]
+        fn integration_status_string_error() {
+            let status = UccStatus::Known(UccError::ErrInvalidParam);
+            let s = ucc_status_string(status);
+            assert!(
+                s.contains("INVALID_PARAM") || s.contains("invalid"),
+                "Status string should mention invalid param, got: {}",
+                s
+            );
+        }
+
+        #[test]
+        fn integration_status_string_unknown() {
+            let status = UccStatus::Unknown(-999);
+            let s = ucc_status_string(status);
+            assert!(
+                !s.is_empty(),
+                "Status string for unknown code should not be empty, got: '{}'",
+                s
+            );
+        }
+
+        #[test]
+        fn integration_lib_get_attr_thread_mode() {
+            let lib = UccLib::init().expect("init");
+            let attrs = lib
+                .get_attr(UccLibAttrField::THREAD_MODE.0)
+                .expect("get_attr(THREAD_MODE) should succeed");
+            assert_eq!(
+                attrs.thread_mode(),
+                ucc_thread_mode_t_UCC_THREAD_SINGLE,
+                "Default thread mode should be SINGLE"
+            );
+        }
+
+        #[test]
+        fn integration_lib_get_attr_coll_types() {
+            let lib = UccLib::init().expect("init");
+            let attrs = lib
+                .get_attr(UccLibAttrField::COLL_TYPES.0)
+                .expect("get_attr(COLL_TYPES) should succeed");
+            assert!(
+                attrs.coll_types() > 0,
+                "coll_types bitmask should be non-zero, got {}",
+                attrs.coll_types()
+            );
+        }
+
+        #[test]
+        fn integration_lib_get_attr_reduction_types() {
+            let lib = UccLib::init().expect("init");
+            let attrs = lib
+                .get_attr(UccLibAttrField::REDUCTION_TYPES.0)
+                .expect("get_attr(REDUCTION_TYPES) should succeed");
+            assert!(
+                attrs.reduction_types() > 0,
+                "reduction_types bitmask should be non-zero, got {}",
+                attrs.reduction_types()
+            );
+        }
+
+        #[test]
+        fn integration_lib_get_attr_sync_type() {
+            let lib = UccLib::init().expect("init");
+            let attrs = lib
+                .get_attr(UccLibAttrField::SYNC_TYPE.0)
+                .expect("get_attr(SYNC_TYPE) should succeed");
+            assert_eq!(
+                attrs.sync_type(),
+                ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
+                "Default sync type should be COLLECTIVES"
+            );
+        }
+
+        #[test]
+        fn integration_lib_get_attr_combined_mask() {
+            let lib = UccLib::init().expect("init");
+            let mask = UccLibAttrField::THREAD_MODE | UccLibAttrField::COLL_TYPES;
+            let attrs = lib
+                .get_attr(mask)
+                .expect("get_attr(combined) should succeed");
+            // Both fields should be populated
+            assert!(attrs.thread_mode() > 0, "thread_mode should be set");
+            assert!(attrs.coll_types() > 0, "coll_types should be set");
+        }
+
+        #[test]
+        fn integration_lib_config_read_and_modify() {
+            let config = UccLibConfig::read().expect("config read should succeed");
+            // Modifying a non-critical key should not fail
+            let _ = config.modify("IB_GID_INDEX", "0");
+        }
+
+        #[test]
+        fn integration_lib_with_custom_params() {
+            let mut params = UccLibParams::default();
+            params.with_coll_types(0xFF);
+            let lib = UccLib::with_params(params).expect("init with custom params");
+            assert!(!lib.handle().is_null());
+        }
     }
 }

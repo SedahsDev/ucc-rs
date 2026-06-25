@@ -19,16 +19,31 @@ use crate::collective::{DataType, ReductionOp, UccCollectiveRequest};
 use crate::context::UccContext;
 use crate::status::{check_status, UccError, UccStatus};
 
+/// Internal shared state for UccTeam — Rc-backed so clones share the
+/// same C handle and `ucc_team_destroy` is called exactly once.
+/// Note: UCC handles are thread-local by design, so `Rc` (not `Arc`) is correct.
+struct UccTeamInner {
+    handle: ucc_team_h,
+    _ctx: UccContext,
+}
+
 /// UCC team handle with RAII cleanup.
 ///
 /// Teams define groups of processes that participate in collective operations.
 /// Holds a reference to the [`UccContext`] that created it. Cloneable — each
-/// clone shares the same underlying C handle.
+/// clone shares the same underlying C handle via `Rc`,
+/// so `ucc_team_destroy` is called exactly once when the last clone is dropped.
 #[must_use = "Team handles should be kept alive or explicitly dropped"]
-#[derive(Clone)]
 pub struct UccTeam {
-    handle: ucc_team_h,
-    _ctx: UccContext,
+    inner: std::rc::Rc<UccTeamInner>,
+}
+
+impl Clone for UccTeam {
+    fn clone(&self) -> Self {
+        Self {
+            inner: std::rc::Rc::clone(&self.inner),
+        }
+    }
 }
 
 impl UccTeam {
@@ -67,8 +82,10 @@ impl UccTeam {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
         Ok(Self {
-            handle: team,
-            _ctx: ctx,
+            inner: std::rc::Rc::new(UccTeamInner {
+                handle: team,
+                _ctx: ctx,
+            }),
         })
     }
 
@@ -81,12 +98,12 @@ impl UccTeam {
     ) -> Result<Self, UccStatus> {
         let mut team: ucc_team_h = std::ptr::null_mut();
         let status = unsafe {
-            // Safety: parent.handle is a valid team handle; team_params.0 is a
+            // Safety: parent.inner.handle is a valid team handle; team_params.0 is a
             // valid reference; &mut team is a valid output pointer.
             ucc_team_create_from_parent(
                 team_params.0.ep,
                 1, // included = 1
-                parent.handle,
+                parent.inner.handle,
                 &mut team,
             )
         };
@@ -95,14 +112,16 @@ impl UccTeam {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
         Ok(Self {
-            handle: team,
-            _ctx: ctx,
+            inner: std::rc::Rc::new(UccTeamInner {
+                handle: team,
+                _ctx: ctx,
+            }),
         })
     }
 
     /// Get a raw handle for use with lower-level APIs.
     pub fn handle(&self) -> ucc_team_h {
-        self.handle
+        self.inner.handle
     }
 
     /// Query team attributes.
@@ -113,9 +132,9 @@ impl UccTeam {
         let mut attr: ucc_team_attr = unsafe { std::mem::zeroed() };
         attr.mask = fields;
         let status = unsafe {
-            // Safety: self.handle is a valid team handle; &mut attr is a valid
+            // Safety: self.inner.handle is a valid team handle; &mut attr is a valid
             // output pointer with the mask pre-set to request specific fields.
-            ucc_team_get_attr(self.handle, &mut attr)
+            ucc_team_get_attr(self.inner.handle, &mut attr)
         };
         check_status(status)?;
         Ok(attr)
@@ -199,8 +218,8 @@ impl UccTeam {
         let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
         let status = unsafe {
             // Safety: args is a valid mutable reference; coll_req is a valid output pointer;
-            // self.handle is a valid team handle.
-            ucc_collective_init_and_post(&mut args, &mut coll_req, self.handle)
+            // self.inner.handle is a valid team handle.
+            ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle)
         };
         check_status(status)?;
         if coll_req.is_null() {
@@ -212,19 +231,21 @@ impl UccTeam {
 
 impl Drop for UccTeam {
     fn drop(&mut self) {
-        if !self.handle.is_null() {
-            // Safety: handle was validated non-null above and the C function only
-            // dereferences the handle pointer for cleanup. Handle is nulled after
-            // to prevent double-free.
-            let _ = unsafe { ucc_team_destroy(self.handle) };
-            self.handle = std::ptr::null_mut();
+        // Rc ensures ucc_team_destroy is called exactly once — when the last
+        // UccTeam clone is dropped.
+        let handle = std::rc::Rc::get_mut(&mut self.inner)
+            .map(|inner| std::mem::replace(&mut inner.handle, std::ptr::null_mut()))
+            .filter(|h| !h.is_null());
+        if let Some(h) = handle {
+            unsafe {
+                // Safety: handle was validated non-null and is a valid team handle.
+                ucc_team_destroy(h);
+            }
         }
     }
 }
 
 /// Parameters for UCC team creation.
-///
-/// Wraps `ucc_team_params` and manages the field mask automatically.
 /// Configure team properties like ordering, sync type, and team size.
 #[must_use = "Team params should be used to create a team"]
 pub struct UccTeamParams(ucc_team_params);
@@ -320,5 +341,34 @@ mod tests {
     fn test_ucc_team_handle_size() {
         // UccTeam wraps a raw FFI handle — intentionally not Send.
         let _ = std::mem::size_of::<UccTeam>();
+    }
+
+    // ── Integration tests (call into libucc.so) ────────────────────────────
+    //
+    // NOTE: Team creation tests (UccTeam::new / UccTeam::with_params) cannot
+    // be run because the FFI binding references `ucc_team_create_from_parent`,
+    // which does not exist in UCC 1.9.0 (only `ucc_team_create_post` /
+    // `ucc_team_create_test` are available). These tests are omitted until
+    // the binding is corrected.
+
+    mod integration_tests {
+        use super::*;
+
+        /// Verify team params can be configured without creating a team.
+        /// This tests the params builder pattern — no FFI call to the missing
+        /// `ucc_team_create_from_parent` is needed.
+        #[test]
+        fn integration_team_params_configuration() {
+            let mut params = UccTeamParams::default();
+            params.with_team_size(4);
+            params.with_flags(0x10);
+            assert_eq!(params.0.team_size, 4);
+            assert_eq!(params.0.flags, 0x10);
+            // Verify mask includes the fields we set
+            assert!(
+                params.0.mask & ucc_team_params_field_UCC_TEAM_PARAM_FIELD_TEAM_SIZE as u64 != 0
+            );
+            assert!(params.0.mask & ucc_team_params_field_UCC_TEAM_PARAM_FIELD_FLAGS as u64 != 0);
+        }
     }
 }

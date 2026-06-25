@@ -103,17 +103,32 @@ impl Drop for UccContextConfig {
     }
 }
 
+/// Internal shared state for UccContext — Rc-backed so clones share the
+/// same C handle and `ucc_context_destroy` is called exactly once.
+/// Note: UCC handles are thread-local by design, so `Rc` (not `Arc`) is correct.
+struct UccContextInner {
+    handle: ucc_context_h,
+    _lib: UccLib,
+}
+
 /// UCC context handle with RAII cleanup.
 ///
 /// Represents a UCC communication context — the primary resource for
 /// creating teams and running collective operations. Holds a reference
 /// to the [`UccLib`] that created it, keeping the library alive.
-/// Cloneable — each clone shares the same underlying C handle.
+/// Cloneable — each clone shares the same underlying C handle via `Rc`,
+/// so `ucc_context_destroy` is called exactly once when the last clone is dropped.
 #[must_use = "Context handles should be kept alive or explicitly dropped"]
-#[derive(Clone)]
 pub struct UccContext {
-    handle: ucc_context_h,
-    _lib: UccLib,
+    inner: std::rc::Rc<UccContextInner>,
+}
+
+impl Clone for UccContext {
+    fn clone(&self) -> Self {
+        Self {
+            inner: std::rc::Rc::clone(&self.inner),
+        }
+    }
 }
 
 impl UccContext {
@@ -143,14 +158,16 @@ impl UccContext {
         }
         // config is dropped here, releasing the context config handle
         Ok(Self {
-            handle: context,
-            _lib: lib,
+            inner: std::rc::Rc::new(UccContextInner {
+                handle: context,
+                _lib: lib,
+            }),
         })
     }
 
     /// Get a raw handle for use with lower-level APIs.
     pub fn handle(&self) -> ucc_context_h {
-        self.handle
+        self.inner.handle
     }
 
     /// Query context attributes.
@@ -176,8 +193,8 @@ impl UccContext {
         };
         attr.mask = mask;
         let status = unsafe {
-            // Safety: self.handle is a valid context handle and &mut attr is a valid pointer.
-            ucc_context_get_attr(self.handle, &mut attr)
+            // Safety: self.inner.handle is a valid context handle and &mut attr is a valid pointer.
+            ucc_context_get_attr(self.inner.handle, &mut attr)
         };
         check_status(status)?;
         Ok(UccContextAttrs(attr))
@@ -189,22 +206,24 @@ impl UccContext {
     /// This is a blocking call that may perform network I/O.
     pub fn progress(&self) {
         unsafe {
-            // Safety: self.handle is a valid context handle.
-            ucc_context_progress(self.handle);
+            // Safety: self.inner.handle is a valid context handle.
+            ucc_context_progress(self.inner.handle);
         }
     }
 }
 
 impl Drop for UccContext {
     fn drop(&mut self) {
-        if !self.handle.is_null() {
-            // Safety: handle was validated non-null above and the C function only
-            // dereferences the handle pointer for cleanup. Handle is nulled after
-            // to prevent double-free.
+        // Rc ensures ucc_context_destroy is called exactly once — when the last
+        // UccContext clone is dropped.
+        let handle = std::rc::Rc::get_mut(&mut self.inner)
+            .map(|inner| std::mem::replace(&mut inner.handle, std::ptr::null_mut()))
+            .filter(|h| !h.is_null());
+        if let Some(h) = handle {
             unsafe {
-                ucc_context_destroy(self.handle);
+                // Safety: handle was validated non-null and is a valid context handle.
+                ucc_context_destroy(h);
             }
-            self.handle = std::ptr::null_mut();
         }
     }
 }
@@ -385,5 +404,105 @@ mod tests {
     fn test_ucc_context_config_has_handle() {
         // UccContextConfig wraps a raw FFI handle — intentionally not Send.
         let _ = std::mem::size_of::<UccContextConfig>();
+    }
+
+    // ── Integration tests (call into libucc.so) ────────────────────────────
+
+    mod integration_tests {
+        use super::*;
+
+        #[test]
+        fn integration_context_create_and_drop() {
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context create should succeed");
+            assert!(!ctx.handle().is_null(), "Context handle must be non-null");
+            // ctx dropped here — ucc_context_destroy called automatically
+        }
+
+        #[test]
+        fn integration_context_create_twice() {
+            for _ in 0..3 {
+                let lib = UccLib::init().expect("init");
+                let ctx = UccContext::new(lib).expect("context create");
+                assert!(!ctx.handle().is_null());
+                // drop
+            }
+        }
+
+        #[test]
+        fn integration_context_get_attr_type() {
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let attrs = ctx
+                .get_attr(UccContextAttrField::TYPE.0)
+                .expect("get_attr(TYPE) should succeed");
+            assert_eq!(
+                attrs.context_type(),
+                ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
+                "Default context type should be EXCLUSIVE"
+            );
+        }
+
+        #[test]
+        fn integration_context_get_attr_sync_type() {
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let attrs = ctx
+                .get_attr(UccContextAttrField::SYNC_TYPE.0)
+                .expect("get_attr(SYNC_TYPE) should succeed");
+            assert_eq!(
+                attrs.sync_type(),
+                ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
+                "Default sync type should be COLLECTIVES"
+            );
+        }
+
+        #[test]
+        fn integration_context_get_attr_combined_mask() {
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let mask = UccContextAttrField::TYPE | UccContextAttrField::SYNC_TYPE;
+            let attrs = ctx
+                .get_attr(mask)
+                .expect("get_attr(combined) should succeed");
+            assert!(attrs.context_type() > 0, "context_type should be set");
+            assert!(attrs.sync_type() > 0, "sync_type should be set");
+        }
+
+        #[test]
+        fn integration_context_progress() {
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context create");
+            // progress() should not panic or crash — it's a no-op with no pending ops
+            ctx.progress();
+        }
+
+        #[test]
+        fn integration_context_clone() {
+            // Verify UccContext::clone() works. Keep the original alive so both
+            // clones share the same handle and only one drop actually destroys.
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let _clone = ctx.clone();
+            assert!(!ctx.handle().is_null());
+            // ctx dropped last — only its drop calls ucc_context_destroy
+        }
+
+        #[test]
+        fn integration_context_config_read_and_modify() {
+            let lib = UccLib::init().expect("init");
+            let config = UccContextConfig::read(&lib).expect("context config read");
+            // Modifying a non-critical key should not fail
+            let _ = config.modify("IB_GID_INDEX", "0");
+        }
+
+        #[test]
+        fn integration_context_with_custom_params() {
+            let mut params = UccContextParams::default();
+            params.with_id(42);
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::with_params(lib, params).expect("context with custom params");
+            assert!(!ctx.handle().is_null());
+        }
     }
 }
