@@ -13,10 +13,13 @@
 //! and length for later use by collective operations.
 
 use crate::bindings::{
-    ucc_mem_map, ucc_mem_map_mem_h, ucc_mem_map_params,
-    ucc_mem_map_params_t, ucc_mem_unmap,
+    ucc_mem_map,
+    ucc_mem_map_mem_h,
     // constified enum constants
     ucc_mem_map_mode_t_UCC_MEM_MAP_MODE_EXPORT,
+    ucc_mem_map_params,
+    ucc_mem_map_params_t,
+    ucc_mem_unmap,
 };
 use crate::context::UccContext;
 use crate::status::{check_status, UccError, UccStatus};
@@ -43,7 +46,11 @@ impl UccMemHandle {
     /// The caller must ensure that `addr` points to a valid memory region
     /// of at least `length` bytes that remains valid for the lifetime of
     /// the returned [`UccMemHandle`].
-    pub unsafe fn map_raw(context: &UccContext, addr: *mut std::os::raw::c_void, length: usize) -> Result<Self, UccStatus> {
+    pub unsafe fn map_raw(
+        context: &UccContext,
+        addr: *mut std::os::raw::c_void,
+        length: usize,
+    ) -> Result<Self, UccStatus> {
         let ctx_handle = context.handle();
         let mut memh: ucc_mem_map_mem_h = std::ptr::null_mut();
         let mut memh_size: usize = 0;
@@ -72,7 +79,10 @@ impl UccMemHandle {
         if memh.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(Self { memh, mapped_len: length })
+        Ok(Self {
+            memh,
+            mapped_len: length,
+        })
     }
 
     /// Safely map a shared byte slice at a context.
@@ -84,7 +94,11 @@ impl UccMemHandle {
     pub fn map_slice(context: &UccContext, slice: &[u8]) -> Result<Self, UccStatus> {
         unsafe {
             // Safety: slice pointer is valid for the handle lifetime; caller guarantees memory outlives the handle.
-             Self::map_raw(context, slice.as_ptr() as *mut std::os::raw::c_void, slice.len())
+            Self::map_raw(
+                context,
+                slice.as_ptr() as *mut std::os::raw::c_void,
+                slice.len(),
+            )
         }
     }
 
@@ -97,7 +111,11 @@ impl UccMemHandle {
     pub fn map_slice_mut(context: &UccContext, slice: &mut [u8]) -> Result<Self, UccStatus> {
         unsafe {
             // Safety: slice pointer is valid for the handle lifetime; caller guarantees memory outlives the handle.
-             Self::map_raw(context, slice.as_mut_ptr() as *mut std::os::raw::c_void, slice.len())
+            Self::map_raw(
+                context,
+                slice.as_mut_ptr() as *mut std::os::raw::c_void,
+                slice.len(),
+            )
         }
     }
 

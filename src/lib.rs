@@ -30,6 +30,10 @@ mod bindings;
 // Re-export status types at crate root for ergonomic access
 pub use status::{check_status, UccError, UccStatus};
 
+// Re-export raw FFI status type and constants for downstream crates
+// that need to interface with C-compatible function signatures (e.g. osu-rs).
+pub use bindings::{ucc_status_t, ucc_status_t_UCC_ERR_NO_MESSAGE, ucc_status_t_UCC_OK};
+
 // Core modules
 pub mod collective;
 pub mod context;

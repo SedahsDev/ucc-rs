@@ -5,11 +5,11 @@
 //! pipelining and synchronization patterns.
 
 use crate::bindings::{
-    ucc_ee_ack_event, ucc_ee_create, ucc_ee_destroy, ucc_ee_get_event, ucc_ee_h,
-    ucc_ee_params, ucc_ee_set_event, ucc_ee_wait,
+    ucc_ee_ack_event, ucc_ee_create, ucc_ee_destroy, ucc_ee_get_event, ucc_ee_h, ucc_ee_params,
+    ucc_ee_set_event, ucc_ee_wait,
 };
-use crate::team::UccTeam;
 use crate::status::{check_status, UccError, UccStatus};
+use crate::team::UccTeam;
 
 /// UCC execution engine handle with RAII cleanup.
 ///

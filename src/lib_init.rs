@@ -5,16 +5,15 @@
 //! be created via `ucc_lib_config_read` before `ucc_init_version`.
 
 use crate::bindings::{
-    ucc_coll_sync_type_t, ucc_finalize, ucc_get_version, ucc_get_version_string,
-    ucc_init_version, ucc_lib_config_h, ucc_lib_config_modify, ucc_lib_config_print,
-    ucc_lib_config_read, ucc_lib_config_release, ucc_lib_get_attr, ucc_lib_h,
-    ucc_lib_params, ucc_status_string as ucc_status_string_raw, ucc_thread_mode_t,
-    ucc_lib_params_field_UCC_LIB_PARAM_FIELD_COLL_TYPES,
+    ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_finalize, ucc_get_version,
+    ucc_get_version_string, ucc_init_version, ucc_lib_config_h, ucc_lib_config_modify,
+    ucc_lib_config_print, ucc_lib_config_read, ucc_lib_config_release, ucc_lib_get_attr, ucc_lib_h,
+    ucc_lib_params, ucc_lib_params_field_UCC_LIB_PARAM_FIELD_COLL_TYPES,
     ucc_lib_params_field_UCC_LIB_PARAM_FIELD_REDUCTION_TYPES,
     ucc_lib_params_field_UCC_LIB_PARAM_FIELD_SYNC_TYPE,
     ucc_lib_params_field_UCC_LIB_PARAM_FIELD_THREAD_MODE,
+    ucc_status_string as ucc_status_string_raw, ucc_thread_mode_t,
     ucc_thread_mode_t_UCC_THREAD_SINGLE,
-    ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
 };
 use crate::status::{check_status, UccStatus};
 
@@ -29,7 +28,7 @@ pub struct UccLibConfig {
 }
 
 impl UccLibConfig {
- /// Read the UCC library configuration from environment variables.
+    /// Read the UCC library configuration from environment variables.
     #[must_use = "Result should be checked"]
     pub fn read() -> Result<Self, UccStatus> {
         let mut config: ucc_lib_config_h = std::ptr::null_mut();
@@ -130,13 +129,7 @@ impl UccLib {
             // Safety: lib_params and config are valid references; &mut lib is a
             // valid output pointer. ucc_init_version only writes to this pointer
             // on success.
-            ucc_init_version(
-                1,
-                9,
-                &lib_params.0,
-                config.handle(),
-                &mut lib,
-            )
+            ucc_init_version(1, 9, &lib_params.0, config.handle(), &mut lib)
         };
         check_status(status)?;
         // config is dropped here, releasing the config handle
@@ -246,7 +239,8 @@ impl UccLibParams {
     /// Set the reduction types bitmask.
     pub fn with_reduction_types(&mut self, reduction_types: u64) {
         self.0.reduction_types = reduction_types;
-        self.0.mask |= crate::bindings::ucc_lib_params_field_UCC_LIB_PARAM_FIELD_REDUCTION_TYPES as u64;
+        self.0.mask |=
+            crate::bindings::ucc_lib_params_field_UCC_LIB_PARAM_FIELD_REDUCTION_TYPES as u64;
     }
 
     /// Access the inner params for advanced configuration.
@@ -392,7 +386,10 @@ mod tests {
     fn test_ucc_lib_params_default() {
         let params = UccLibParams::default();
         assert_eq!(params.0.thread_mode, ucc_thread_mode_t_UCC_THREAD_SINGLE);
-        assert_eq!(params.0.sync_type, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES);
+        assert_eq!(
+            params.0.sync_type,
+            ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES
+        );
         assert_eq!(params.0.coll_types, u64::MAX);
         assert_eq!(params.0.reduction_types, u64::MAX);
     }

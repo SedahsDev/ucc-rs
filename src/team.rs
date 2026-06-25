@@ -5,13 +5,10 @@
 //! parent-child relationships.
 
 use crate::bindings::{
-    ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
-    ucc_oob_coll_t, ucc_post_ordering_t,
-    ucc_post_ordering_t_UCC_COLLECTIVE_POST_ORDERED,
-    ucc_team_attr, ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_EP,
-    ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE,
-    ucc_team_create_from_parent, ucc_team_destroy, ucc_team_get_attr,
-    ucc_team_h, ucc_team_params,
+    ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_oob_coll_t,
+    ucc_post_ordering_t, ucc_post_ordering_t_UCC_COLLECTIVE_POST_ORDERED, ucc_team_attr,
+    ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_EP, ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE,
+    ucc_team_create_from_parent, ucc_team_destroy, ucc_team_get_attr, ucc_team_h, ucc_team_params,
     ucc_team_params_field_UCC_TEAM_PARAM_FIELD_FLAGS,
     ucc_team_params_field_UCC_TEAM_PARAM_FIELD_OOB,
     ucc_team_params_field_UCC_TEAM_PARAM_FIELD_ORDERING,
