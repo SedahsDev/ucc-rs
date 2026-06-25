@@ -234,7 +234,7 @@ impl UccContextAttrs {
 
     /// Get the context address length.
     pub fn ctx_addr_len(&self) -> usize {
-        self.0.ctx_addr_len as usize
+        self.0.ctx_addr_len
     }
 
     /// Get the global work buffer size.

@@ -256,7 +256,7 @@ impl From<UccError> for UccStatus {
 
 impl From<ucc_status_t> for UccStatus {
     fn from(raw: ucc_status_t) -> Self {
-        Self::from_raw(raw as i32)
+        Self::from_raw(raw)
     }
 }
 
@@ -266,7 +266,7 @@ impl From<ucc_status_t> for UccStatus {
 /// (including `UCC_INPROGRESS` and error codes).
 #[must_use = "Status checks should not be ignored"]
 pub fn check_status(status: ucc_status_t) -> Result<(), UccStatus> {
-    let ucc_status = UccStatus::from_raw(status as i32);
+    let ucc_status = UccStatus::from_raw(status);
     if ucc_status.is_ok() {
         Ok(())
     } else {

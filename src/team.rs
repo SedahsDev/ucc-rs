@@ -15,6 +15,7 @@ use crate::bindings::{
     ucc_team_params_field_UCC_TEAM_PARAM_FIELD_SYNC_TYPE,
     ucc_team_params_field_UCC_TEAM_PARAM_FIELD_TEAM_SIZE,
 };
+use crate::collective::{DataType, ReductionOp, UccCollectiveRequest};
 use crate::context::UccContext;
 use crate::status::{check_status, UccError, UccStatus};
 
@@ -130,6 +131,82 @@ impl UccTeam {
     pub fn ep(&self) -> Result<u64, UccStatus> {
         let attr = self.attr(ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_EP as u64)?;
         Ok(attr.ep)
+    }
+
+    /// Perform a non-blocking allreduce collective operation.
+    ///
+    /// This is a convenience method that initializes and posts an allreduce
+    /// collective in one step. The operation is in-place — the send buffer
+    /// is modified to contain the reduced result.
+    ///
+    /// # Arguments
+    ///
+    /// * `buf` — Send/receive buffer (mutable slice). Modified in place.
+    /// * `datatype` — Element data type (e.g., `DataType::Uchar`).
+    /// * `op` — Reduction operation (e.g., `ReductionOp::Sum`).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ucc::{lib_init::UccLib, context::UccContext, team::UccTeam, collective::{DataType, ReductionOp}};
+    /// # let lib = UccLib::init().unwrap();
+    /// # let ctx = UccContext::new(lib).unwrap();
+    /// # let team = UccTeam::new(ctx).unwrap();
+    /// let mut buf = vec![1u8; 1024];
+    /// let mut req = team.allreduce(&mut buf, DataType::Uchar, ReductionOp::Sum).unwrap();
+    /// while !req.test().unwrap_or(false) {
+    ///     // progress...
+    /// }
+    /// ```
+    #[must_use = "Result should be checked"]
+    pub fn allreduce(
+        &self,
+        buf: &mut [u8],
+        datatype: DataType,
+        op: ReductionOp,
+    ) -> Result<UccCollectiveRequest, UccStatus> {
+        use crate::bindings::{
+            ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
+            ucc_coll_type_t_UCC_COLL_TYPE_ALLREDUCE, ucc_collective_init_and_post,
+            ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
+        };
+
+        let count = (buf.len() / datatype.size_in_bytes()) as u64;
+        let buf_ptr = buf.as_mut_ptr() as *mut std::os::raw::c_void;
+
+        // Safety: ucc_coll_args is a POD struct; we initialize all fields explicitly.
+        let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
+        args.coll_type = ucc_coll_type_t_UCC_COLL_TYPE_ALLREDUCE;
+        args.src.info.buffer = buf_ptr;
+        args.dst.info.buffer = buf_ptr;
+        args.src.info.count = count;
+        args.src.info.datatype = datatype.as_raw();
+        args.dst.info.count = count;
+        args.dst.info.datatype = datatype.as_raw();
+        args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.op = op.as_raw();
+        args.root = 0;
+        args.tag = 0 as ucc_coll_id_t;
+        args.flags = 0;
+        args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
+        args.cb = ucc_coll_callback {
+            cb: None,
+            data: std::ptr::null_mut(),
+        };
+        args.timeout = 0.0;
+
+        let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
+        let status = unsafe {
+            // Safety: args is a valid mutable reference; coll_req is a valid output pointer;
+            // self.handle is a valid team handle.
+            ucc_collective_init_and_post(&mut args, &mut coll_req, self.handle)
+        };
+        check_status(status)?;
+        if coll_req.is_null() {
+            return Err(UccStatus::Known(UccError::ErrNoResource));
+        }
+        Ok(UccCollectiveRequest { request: coll_req })
     }
 }
 

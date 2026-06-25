@@ -18,7 +18,7 @@ use crate::bindings::{
     ucc_reduction_op_t_UCC_OP_BAND, ucc_reduction_op_t_UCC_OP_BOR, ucc_reduction_op_t_UCC_OP_BXOR,
     ucc_reduction_op_t_UCC_OP_LAND, ucc_reduction_op_t_UCC_OP_LOR, ucc_reduction_op_t_UCC_OP_LXOR,
     ucc_reduction_op_t_UCC_OP_MAX, ucc_reduction_op_t_UCC_OP_MIN, ucc_reduction_op_t_UCC_OP_PROD,
-    ucc_reduction_op_t_UCC_OP_SUM,
+    ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t_UCC_ERR_NO_MESSAGE, ucc_status_t_UCC_OK,
 };
 use crate::memory::UccMemHandle;
 use crate::status::{check_status, UccError, UccStatus};
@@ -28,20 +28,20 @@ use crate::team::UccTeam;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum UccCollectiveType {
-    Allreduce = ucc_coll_type_t_UCC_COLL_TYPE_ALLREDUCE as u32,
-    Reduce = ucc_coll_type_t_UCC_COLL_TYPE_REDUCE as u32,
-    Broadcast = ucc_coll_type_t_UCC_COLL_TYPE_BCAST as u32,
-    Allgather = ucc_coll_type_t_UCC_COLL_TYPE_ALLGATHER as u32,
-    ReduceScatter = ucc_coll_type_t_UCC_COLL_TYPE_REDUCE_SCATTER as u32,
-    Gather = ucc_coll_type_t_UCC_COLL_TYPE_GATHER as u32,
-    GatherV = ucc_coll_type_t_UCC_COLL_TYPE_GATHERV as u32,
-    Scatter = ucc_coll_type_t_UCC_COLL_TYPE_SCATTER as u32,
-    ScatterV = ucc_coll_type_t_UCC_COLL_TYPE_SCATTERV as u32,
-    Alltoall = ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALL as u32,
-    AlltoallV = ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALLV as u32,
-    Barrier = ucc_coll_type_t_UCC_COLL_TYPE_BARRIER as u32,
-    FanIn = ucc_coll_type_t_UCC_COLL_TYPE_FANIN as u32,
-    FanOut = ucc_coll_type_t_UCC_COLL_TYPE_FANOUT as u32,
+    Allreduce = ucc_coll_type_t_UCC_COLL_TYPE_ALLREDUCE,
+    Reduce = ucc_coll_type_t_UCC_COLL_TYPE_REDUCE,
+    Broadcast = ucc_coll_type_t_UCC_COLL_TYPE_BCAST,
+    Allgather = ucc_coll_type_t_UCC_COLL_TYPE_ALLGATHER,
+    ReduceScatter = ucc_coll_type_t_UCC_COLL_TYPE_REDUCE_SCATTER,
+    Gather = ucc_coll_type_t_UCC_COLL_TYPE_GATHER,
+    GatherV = ucc_coll_type_t_UCC_COLL_TYPE_GATHERV,
+    Scatter = ucc_coll_type_t_UCC_COLL_TYPE_SCATTER,
+    ScatterV = ucc_coll_type_t_UCC_COLL_TYPE_SCATTERV,
+    Alltoall = ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALL,
+    AlltoallV = ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALLV,
+    Barrier = ucc_coll_type_t_UCC_COLL_TYPE_BARRIER,
+    FanIn = ucc_coll_type_t_UCC_COLL_TYPE_FANIN,
+    FanOut = ucc_coll_type_t_UCC_COLL_TYPE_FANOUT,
 }
 
 impl UccCollectiveType {
@@ -55,22 +55,140 @@ impl UccCollectiveType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum UccReductionOp {
-    Sum = ucc_reduction_op_t_UCC_OP_SUM as u32,
-    Prod = ucc_reduction_op_t_UCC_OP_PROD as u32,
-    Min = ucc_reduction_op_t_UCC_OP_MIN as u32,
-    Max = ucc_reduction_op_t_UCC_OP_MAX as u32,
-    Land = ucc_reduction_op_t_UCC_OP_LAND as u32,
-    Lor = ucc_reduction_op_t_UCC_OP_LOR as u32,
-    Lxor = ucc_reduction_op_t_UCC_OP_LXOR as u32,
-    Band = ucc_reduction_op_t_UCC_OP_BAND as u32,
-    Bor = ucc_reduction_op_t_UCC_OP_BOR as u32,
-    Bxor = ucc_reduction_op_t_UCC_OP_BXOR as u32,
+    Sum = ucc_reduction_op_t_UCC_OP_SUM,
+    Prod = ucc_reduction_op_t_UCC_OP_PROD,
+    Min = ucc_reduction_op_t_UCC_OP_MIN,
+    Max = ucc_reduction_op_t_UCC_OP_MAX,
+    Land = ucc_reduction_op_t_UCC_OP_LAND,
+    Lor = ucc_reduction_op_t_UCC_OP_LOR,
+    Lxor = ucc_reduction_op_t_UCC_OP_LXOR,
+    Band = ucc_reduction_op_t_UCC_OP_BAND,
+    Bor = ucc_reduction_op_t_UCC_OP_BOR,
+    Bxor = ucc_reduction_op_t_UCC_OP_BXOR,
 }
 
 impl UccReductionOp {
     /// Convert to the raw FFI type.
     pub fn as_raw(self) -> ucc_reduction_op_t {
         self as ucc_reduction_op_t
+    }
+}
+
+/// Alias for backward compatibility with osu-rs import paths.
+pub type ReductionOp = UccReductionOp;
+
+/// UCC datatype enum for safe API usage.
+///
+/// Maps directly to the `UCC_DT_*` predefined datatypes from the UCC C API.
+/// These are simple integer values (0–17) used in collective operations
+/// to specify element types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+#[allow(non_upper_case_globals)]
+pub enum DataType {
+    /// 8-bit signed integer (int8_t)
+    Int8 = 0,
+    /// 16-bit signed integer (int16_t)
+    Int16 = 1,
+    /// 32-bit signed integer (int32_t)
+    Int32 = 2,
+    /// 64-bit signed integer (int64_t)
+    Int64 = 3,
+    /// 128-bit signed integer
+    Int128 = 4,
+    /// 8-bit unsigned integer (uint8_t / unsigned char)
+    Uint8 = 5,
+    /// 16-bit unsigned integer (uint16_t)
+    Uint16 = 6,
+    /// 32-bit unsigned integer (uint32_t)
+    Uint32 = 7,
+    /// 64-bit unsigned integer (uint64_t)
+    Uint64 = 8,
+    /// 128-bit unsigned integer
+    Uint128 = 9,
+    /// 16-bit float (half precision)
+    Float16 = 10,
+    /// 32-bit float (single precision)
+    Float32 = 11,
+    /// 64-bit float (double precision)
+    Float64 = 12,
+    /// 16-bit brain float (bfloat16)
+    BFloat16 = 13,
+    /// 128-bit float (quad precision)
+    Float128 = 14,
+    /// 32-bit complex float (two single-precision floats)
+    Float32Complex = 15,
+    /// 64-bit complex float (two double-precision floats)
+    Float64Complex = 16,
+    /// 128-bit complex float (two quad-precision floats)
+    Float128Complex = 17,
+}
+
+impl DataType {
+    /// Alias for unsigned char — commonly used in byte-level benchmarks.
+    #[allow(non_upper_case_globals)]
+    pub const Uchar: Self = Self::Uint8;
+
+    /// Convert to the raw FFI type (ucc_datatype_t = u64).
+    pub fn as_raw(self) -> ucc_datatype_t {
+        self as ucc_datatype_t
+    }
+
+    /// Size in bytes for this datatype.
+    pub fn size_in_bytes(self) -> usize {
+        match self {
+            Self::Int8 | Self::Uint8 => 1,
+            Self::Int16 | Self::Uint16 | Self::Float16 | Self::BFloat16 => 2,
+            Self::Int32 | Self::Uint32 | Self::Float32 => 4,
+            Self::Int64 | Self::Uint64 | Self::Float64 => 8,
+            Self::Int128 | Self::Uint128 | Self::Float128 => 16,
+            Self::Float32Complex => 8,
+            Self::Float64Complex => 16,
+            Self::Float128Complex => 32,
+        }
+    }
+}
+
+/// Non-blocking collective request handle.
+///
+/// Returned by convenience methods like [`UccTeam::allreduce`].
+/// Use [`UccCollectiveRequest::test`] to poll for completion.
+pub struct UccCollectiveRequest {
+    pub(crate) request: ucc_coll_req_h,
+}
+
+impl UccCollectiveRequest {
+    /// Test whether the collective operation has completed.
+    ///
+    /// Returns `Ok(true)` if the operation is complete, `Ok(false)` if
+    /// still in progress, or `Err` if the operation failed.
+    ///
+    /// This is a Rust equivalent of the C `ucc_collective_test()` inline
+    /// function — reads `request->status` directly.
+    #[allow(non_upper_case_globals)]
+    pub fn test(&self) -> Result<bool, UccStatus> {
+        let status = unsafe {
+            // Safety: self.request is a valid handle from ucc_collective_init_and_post.
+            // ucc_collective_test is just `return request->status;`
+            (*self.request).status
+        };
+        match status {
+            ucc_status_t_UCC_OK => Ok(true),
+            ucc_status_t_UCC_ERR_NO_MESSAGE => Ok(false), // still in progress
+            _ => Err(check_status(status)
+                .err()
+                .unwrap_or(UccStatus::Known(UccError::ErrNoResource))),
+        }
+    }
+}
+
+impl Drop for UccCollectiveRequest {
+    fn drop(&mut self) {
+        if !self.request.is_null() {
+            // Safety: request is a valid handle.
+            let _ = unsafe { ucc_collective_finalize(self.request) };
+            self.request = std::ptr::null_mut();
+        }
     }
 }
 
