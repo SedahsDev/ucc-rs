@@ -5,10 +5,13 @@
 //! parent-child relationships.
 
 use crate::bindings::{
-    ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_oob_coll_t,
-    ucc_post_ordering_t, ucc_post_ordering_t_UCC_COLLECTIVE_POST_ORDERED, ucc_team_attr,
+    ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_h,
+    ucc_ep_range_type_t_UCC_COLLECTIVE_EP_RANGE_CONTIG, ucc_oob_coll_t, ucc_post_ordering_t,
+    ucc_post_ordering_t_UCC_COLLECTIVE_POST_ORDERED, ucc_status_t_UCC_OK, ucc_team_attr,
     ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_EP, ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE,
-    ucc_team_create_from_parent, ucc_team_destroy, ucc_team_get_attr, ucc_team_h, ucc_team_params,
+    ucc_team_create_post, ucc_team_create_test, ucc_team_destroy, ucc_team_get_attr, ucc_team_h,
+    ucc_team_params, ucc_team_params_field_UCC_TEAM_PARAM_FIELD_EP,
+    ucc_team_params_field_UCC_TEAM_PARAM_FIELD_EP_RANGE,
     ucc_team_params_field_UCC_TEAM_PARAM_FIELD_FLAGS,
     ucc_team_params_field_UCC_TEAM_PARAM_FIELD_OOB,
     ucc_team_params_field_UCC_TEAM_PARAM_FIELD_ORDERING,
@@ -58,29 +61,52 @@ impl UccTeam {
 
     /// Create a new team with custom parameters.
     ///
-    /// The FFI signature is:
-    /// `ucc_team_create_from_parent(my_ep, included, parent_team, new_team)`
+    /// Uses the two-phase UCC team creation API:
+    /// 1. `ucc_team_create_post` — posts the team creation request
+    /// 2. `ucc_team_create_test` — polls until the team is ready
     ///
-    /// For a root team, pass `parent_team = NULL`.
+    /// For a root team, the context array contains a single context handle.
     #[must_use = "Result should be checked"]
     pub fn with_params(ctx: UccContext, team_params: UccTeamParams) -> Result<Self, UccStatus> {
         let mut team: ucc_team_h = std::ptr::null_mut();
+        let ctx_handle = ctx.handle();
+        let params_ptr: *const ucc_team_params = &team_params.0;
+
+        // Phase 1: Post team creation
         let status = unsafe {
-            // Safety: team_params.0 is a valid reference; &mut team is a valid
-            // output pointer. ucc_team_create_from_parent accepts NULL for the
-            // parent team to create a root team.
-            // Signature: (my_ep: u64, included: u32, parent_team: ucc_team_h, new_team: *mut ucc_team_h)
-            ucc_team_create_from_parent(
-                team_params.0.ep,
-                1, // included = 1 (this process is part of the team)
-                std::ptr::null_mut(),
-                &mut team,
-            )
+            // Safety: ctx_handle is a valid context handle; params_ptr is valid for the
+            // lifetime of team_params; &mut team is a valid output pointer.
+            // We pass &ctx_handle as *mut ucc_context_h because the API expects an array
+            // of context handles, and we have a single context.
+            let ctx_ptr = &ctx_handle as *const ucc_context_h as *mut ucc_context_h;
+            ucc_team_create_post(ctx_ptr, 1, params_ptr, &mut team)
         };
         check_status(status)?;
         if team.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
+
+        // Phase 2: Test/wait for team creation to complete
+        let mut iterations = 0;
+        loop {
+            let test_status = unsafe {
+                // Safety: team is a valid handle from ucc_team_create_post
+                ucc_team_create_test(team)
+            };
+            if test_status == ucc_status_t_UCC_OK {
+                break;
+            }
+            // Progress the context while waiting
+            ctx.progress();
+            iterations += 1;
+            if iterations > 10000 {
+                unsafe {
+                    ucc_team_destroy(team);
+                }
+                return Err(UccStatus::Known(UccError::ErrTimedOut));
+            }
+        }
+
         Ok(Self {
             inner: std::rc::Rc::new(UccTeamInner {
                 handle: team,
@@ -90,33 +116,20 @@ impl UccTeam {
     }
 
     /// Create a child team from a parent team.
+    ///
+    /// NOTE: UCC 1.9.x uses `ucc_team_create_post`/`ucc_team_create_test` for
+    /// all team creation. The concept of "parent teams" is managed internally by
+    /// UCC based on context hierarchy. This method creates a team using the same
+    /// context as the parent — true hierarchical team splitting requires
+    /// `ucc_team_create_from_parent` which is not available in this UCC version.
     #[must_use = "Result should be checked"]
     pub fn from_parent(
-        parent: &UccTeam,
+        _parent: &UccTeam,
         ctx: UccContext,
         team_params: UccTeamParams,
     ) -> Result<Self, UccStatus> {
-        let mut team: ucc_team_h = std::ptr::null_mut();
-        let status = unsafe {
-            // Safety: parent.inner.handle is a valid team handle; team_params.0 is a
-            // valid reference; &mut team is a valid output pointer.
-            ucc_team_create_from_parent(
-                team_params.0.ep,
-                1, // included = 1
-                parent.inner.handle,
-                &mut team,
-            )
-        };
-        check_status(status)?;
-        if team.is_null() {
-            return Err(UccStatus::Known(UccError::ErrNoResource));
-        }
-        Ok(Self {
-            inner: std::rc::Rc::new(UccTeamInner {
-                handle: team,
-                _ctx: ctx,
-            }),
-        })
+        // Delegate to with_params — parent team concept is managed by UCC internally
+        Self::with_params(ctx, team_params)
     }
 
     /// Get a raw handle for use with lower-level APIs.
@@ -257,8 +270,17 @@ impl Default for UccTeamParams {
         let mut params: ucc_team_params = unsafe { std::mem::zeroed() };
         params.ordering = ucc_post_ordering_t_UCC_COLLECTIVE_POST_ORDERED;
         params.sync_type = ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES;
+        // UCC requires either EP+EP_RANGE or OOB to be set for team creation.
+        // Default to EP=0 + CONTIG range (single-process mode).
+        params.ep = 0;
+        params.ep_range = ucc_ep_range_type_t_UCC_COLLECTIVE_EP_RANGE_CONTIG;
+        params.team_size = 1; // Default single-process team
         params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_ORDERING as u64;
         params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_SYNC_TYPE as u64;
+        params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_FLAGS as u64;
+        params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_TEAM_SIZE as u64;
+        params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_EP as u64;
+        params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_EP_RANGE as u64;
         Self(params)
     }
 }
@@ -337,26 +359,15 @@ mod tests {
         assert_impl_all!(UccTeam: Clone);
     }
 
-    #[test]
-    fn test_ucc_team_handle_size() {
-        // UccTeam wraps a raw FFI handle — intentionally not Send.
-        let _ = std::mem::size_of::<UccTeam>();
-    }
-
     // ── Integration tests (call into libucc.so) ────────────────────────────
-    //
-    // NOTE: Team creation tests (UccTeam::new / UccTeam::with_params) cannot
-    // be run because the FFI binding references `ucc_team_create_from_parent`,
-    // which does not exist in UCC 1.9.0 (only `ucc_team_create_post` /
-    // `ucc_team_create_test` are available). These tests are omitted until
-    // the binding is corrected.
 
     mod integration_tests {
         use super::*;
+        use crate::context::UccContext;
+        use crate::lib_init::UccLib;
 
         /// Verify team params can be configured without creating a team.
-        /// This tests the params builder pattern — no FFI call to the missing
-        /// `ucc_team_create_from_parent` is needed.
+        /// This tests the params builder pattern.
         #[test]
         fn integration_team_params_configuration() {
             let mut params = UccTeamParams::default();
@@ -369,6 +380,42 @@ mod tests {
                 params.0.mask & ucc_team_params_field_UCC_TEAM_PARAM_FIELD_TEAM_SIZE as u64 != 0
             );
             assert!(params.0.mask & ucc_team_params_field_UCC_TEAM_PARAM_FIELD_FLAGS as u64 != 0);
+        }
+
+        /// Integration test: create a team using the correct ucc_team_create_post API.
+        /// This verifies the segfault fix — previously ucc_team_create_from_parent
+        /// was called but doesn't exist in the UCC library.
+        #[test]
+        fn integration_team_create_and_destroy() {
+            let lib = UccLib::init().expect("init");
+            let ctx = UccContext::new(lib).expect("context");
+            let team = UccTeam::new(ctx).expect("team create");
+            // Team should be valid
+            assert!(!team.handle().is_null(), "Team handle must be non-null");
+            let size = team.size().expect("team size");
+            assert_eq!(size, 1, "single-process team should have size 1");
+            // Drop is automatic via RAII
+        }
+
+        /// Integration test: create team with custom params
+        #[test]
+        fn integration_team_create_with_params() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let mut params = UccTeamParams::default();
+            params.with_team_size(1);
+            let team = UccTeam::with_params(ctx, params).expect("team create with params");
+            assert!(!team.handle().is_null());
+        }
+
+        /// Integration test: verify team size query works
+        #[test]
+        fn integration_team_size() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx).expect("team create");
+            let size = team.size().expect("team size query");
+            assert!(size > 0, "Team size should be > 0, got {}", size);
         }
     }
 }
