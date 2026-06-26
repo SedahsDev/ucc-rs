@@ -24,8 +24,9 @@
 //! * [`event_engine`] — Event-driven execution engine for triggered collectives.
 //! * [`status`] — Status codes and error handling (`UccError`, `UccStatus`).
 
-// Auto-generated FFI bindings from ucc.h
-mod bindings;
+// Auto-generated FFI bindings from ucc.h — made public so downstream crates
+// (e.g. osu-rs) can construct OOB callback structs and access FFI constants.
+pub mod bindings;
 
 // Re-export status types at crate root for ergonomic access
 pub use status::{check_status, UccError, UccStatus};
