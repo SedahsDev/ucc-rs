@@ -2,7 +2,7 @@
 rustflags = ["-C", "target-cpu=native"]
 
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=native"]
+rustflags = ["-C", "target-cpu=native", "-C", "link-args=-Wl,-rpath,/home/bzf/projects/ucc/src/.libs"]
 
 [env]
 LD_LIBRARY_PATH = { value = "/home/bzf/projects/ucc/src/.libs", force = true }
