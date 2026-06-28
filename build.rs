@@ -8,6 +8,8 @@ fn main() {
 
     println!("cargo:rustc-link-search={}", ucc_lib.display());
     println!("cargo:rustc-link-lib=ucc");
+    // Set rpath so the runtime linker can find libucc.so.1
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", ucc_lib.display());
     println!("cargo:rerun-if-env-changed=UCC_PREFIX");
     println!("cargo:rerun-if-changed=wrapper.h");
 
