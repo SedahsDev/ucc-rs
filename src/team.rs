@@ -240,6 +240,307 @@ impl UccTeam {
         }
         Ok(UccCollectiveRequest { request: coll_req })
     }
+
+    /// Perform a non-blocking barrier collective operation.
+    ///
+    /// Synchronizes all ranks in the team. No data is transferred —
+    /// this is a synchronization point only.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ucc::{lib_init::UccLib, context::UccContext, team::UccTeam};
+    /// # let lib = UccLib::init().unwrap();
+    /// # let ctx = UccContext::new(lib).unwrap();
+    /// # let team = UccTeam::new(ctx).unwrap();
+    /// let mut req = team.barrier().unwrap();
+    /// while !req.test().unwrap_or(false) {
+    ///     // progress...
+    /// }
+    /// ```
+    #[must_use = "Result should be checked"]
+    pub fn barrier(&self) -> Result<UccCollectiveRequest, UccStatus> {
+        use crate::bindings::{
+            ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
+            ucc_coll_type_t_UCC_COLL_TYPE_BARRIER, ucc_collective_init_and_post,
+            ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
+        };
+
+        // UCC requires non-null buffer pointers, so we use a dummy 1-byte buffer.
+        let mut dummy = [0u8; 1];
+        let buf_ptr = dummy.as_mut_ptr() as *mut std::os::raw::c_void;
+
+        // Safety: ucc_coll_args is a POD struct; we initialize all fields explicitly.
+        let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
+        args.coll_type = ucc_coll_type_t_UCC_COLL_TYPE_BARRIER;
+        args.src.info.buffer = buf_ptr;
+        args.dst.info.buffer = buf_ptr;
+        args.src.info.count = 0;
+        args.src.info.datatype = DataType::Uchar.as_raw();
+        args.dst.info.count = 0;
+        args.dst.info.datatype = DataType::Uchar.as_raw();
+        args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.op = 0;
+        args.root = 0;
+        args.tag = 0 as ucc_coll_id_t;
+        args.flags = 0;
+        args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
+        args.cb = ucc_coll_callback {
+            cb: None,
+            data: std::ptr::null_mut(),
+        };
+        args.timeout = 0.0;
+
+        let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
+        let status = unsafe {
+            // Safety: args is a valid mutable reference; coll_req is a valid output pointer;
+            // self.inner.handle is a valid team handle.
+            ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle)
+        };
+        check_status(status)?;
+        if coll_req.is_null() {
+            return Err(UccStatus::Known(UccError::ErrNoResource));
+        }
+        Ok(UccCollectiveRequest { request: coll_req })
+    }
+
+    /// Perform a non-blocking allgather collective operation.
+    ///
+    /// Each rank contributes its `sendbuf` data, and all ranks receive
+    /// the concatenated contributions from every rank into `recvbuf`.
+    /// The layout in `recvbuf` is contiguous: rank 0's data first, then
+    /// rank 1's, and so on.
+    ///
+    /// # Arguments
+    ///
+    /// * `sendbuf` — Send buffer containing this rank's contribution.
+    /// * `recvbuf` — Receive buffer that will hold all ranks' contributions.
+    /// * `datatype` — Element data type (e.g., `DataType::Uchar`).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ucc::{lib_init::UccLib, context::UccContext, team::UccTeam, collective::DataType};
+    /// # let lib = UccLib::init().unwrap();
+    /// # let ctx = UccContext::new(lib).unwrap();
+    /// # let team = UccTeam::new(ctx).unwrap();
+    /// let sendbuf = vec![42u8; 256];
+    /// let recv_size = 256 * team.size().unwrap() as usize;
+    /// let mut recvbuf = vec![0u8; recv_size];
+    /// let mut req = team.allgather(&sendbuf, &mut recvbuf, DataType::Uchar).unwrap();
+    /// while !req.test().unwrap_or(false) {
+    ///     // progress...
+    /// }
+    /// ```
+    #[must_use = "Result should be checked"]
+    pub fn allgather(
+        &self,
+        sendbuf: &[u8],
+        recvbuf: &mut [u8],
+        datatype: DataType,
+    ) -> Result<UccCollectiveRequest, UccStatus> {
+        use crate::bindings::{
+            ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
+            ucc_coll_type_t_UCC_COLL_TYPE_ALLGATHER, ucc_collective_init_and_post,
+            ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
+        };
+
+        let count = (sendbuf.len() / datatype.size_in_bytes()) as u64;
+        let src_ptr = sendbuf.as_ptr() as *mut std::os::raw::c_void;
+        let dst_ptr = recvbuf.as_mut_ptr() as *mut std::os::raw::c_void;
+
+        // Safety: ucc_coll_args is a POD struct; we initialize all fields explicitly.
+        let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
+        args.coll_type = ucc_coll_type_t_UCC_COLL_TYPE_ALLGATHER;
+        args.src.info.buffer = src_ptr;
+        args.dst.info.buffer = dst_ptr;
+        args.src.info.count = count;
+        args.src.info.datatype = datatype.as_raw();
+        args.dst.info.count = count;
+        args.dst.info.datatype = datatype.as_raw();
+        args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.op = 0;
+        args.root = 0;
+        args.tag = 0 as ucc_coll_id_t;
+        args.flags = 0;
+        args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
+        args.cb = ucc_coll_callback {
+            cb: None,
+            data: std::ptr::null_mut(),
+        };
+        args.timeout = 0.0;
+
+        let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
+        let status = unsafe {
+            // Safety: args is a valid mutable reference; coll_req is a valid output pointer;
+            // self.inner.handle is a valid team handle.
+            ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle)
+        };
+        check_status(status)?;
+        if coll_req.is_null() {
+            return Err(UccStatus::Known(UccError::ErrNoResource));
+        }
+        Ok(UccCollectiveRequest { request: coll_req })
+    }
+
+    /// Perform a non-blocking broadcast collective operation.
+    ///
+    /// The root rank sends data to all other ranks. This is an in-place
+    /// operation — the same buffer is used for both send and receive.
+    ///
+    /// # Arguments
+    ///
+    /// * `buf` — Send/receive buffer. On the root, it contains the data to
+    ///   broadcast. On non-roots, it receives the broadcast data.
+    /// * `datatype` — Element data type (e.g., `DataType::Uchar`).
+    /// * `root` — Rank of the root process that sends the data.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ucc::{lib_init::UccLib, context::UccContext, team::UccTeam, collective::DataType};
+    /// # let lib = UccLib::init().unwrap();
+    /// # let ctx = UccContext::new(lib).unwrap();
+    /// # let team = UccTeam::new(ctx).unwrap();
+    /// let mut buf = vec![0u8; 1024];
+    /// let mut req = team.bcast(&mut buf, DataType::Uchar, 0).unwrap();
+    /// while !req.test().unwrap_or(false) {
+    ///     // progress...
+    /// }
+    /// ```
+    #[must_use = "Result should be checked"]
+    pub fn bcast(
+        &self,
+        buf: &mut [u8],
+        datatype: DataType,
+        root: u32,
+    ) -> Result<UccCollectiveRequest, UccStatus> {
+        use crate::bindings::{
+            ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
+            ucc_coll_type_t_UCC_COLL_TYPE_BCAST, ucc_collective_init_and_post,
+            ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
+        };
+
+        let count = (buf.len() / datatype.size_in_bytes()) as u64;
+        let buf_ptr = buf.as_mut_ptr() as *mut std::os::raw::c_void;
+
+        // Safety: ucc_coll_args is a POD struct; we initialize all fields explicitly.
+        let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
+        args.coll_type = ucc_coll_type_t_UCC_COLL_TYPE_BCAST;
+        args.src.info.buffer = buf_ptr;
+        args.dst.info.buffer = buf_ptr;
+        args.src.info.count = count;
+        args.src.info.datatype = datatype.as_raw();
+        args.dst.info.count = count;
+        args.dst.info.datatype = datatype.as_raw();
+        args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.op = 0;
+        args.root = root as u64;
+        args.tag = 0 as ucc_coll_id_t;
+        args.flags = 0;
+        args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
+        args.cb = ucc_coll_callback {
+            cb: None,
+            data: std::ptr::null_mut(),
+        };
+        args.timeout = 0.0;
+
+        let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
+        let status = unsafe {
+            // Safety: args is a valid mutable reference; coll_req is a valid output pointer;
+            // self.inner.handle is a valid team handle.
+            ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle)
+        };
+        check_status(status)?;
+        if coll_req.is_null() {
+            return Err(UccStatus::Known(UccError::ErrNoResource));
+        }
+        Ok(UccCollectiveRequest { request: coll_req })
+    }
+
+    /// Perform a non-blocking reduce collective operation.
+    ///
+    /// All ranks send data, and the root rank receives the reduced result.
+    /// Only the root's receive buffer is populated after completion.
+    ///
+    /// # Arguments
+    ///
+    /// * `sendbuf` — Send buffer containing this rank's data.
+    /// * `recvbuf` — Receive buffer for the reduced result (only valid on root).
+    /// * `datatype` — Element data type (e.g., `DataType::Uchar`).
+    /// * `op` — Reduction operation (e.g., `ReductionOp::Sum`).
+    /// * `root` — Rank of the root process that receives the result.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use ucc::{lib_init::UccLib, context::UccContext, team::UccTeam, collective::{DataType, ReductionOp}};
+    /// # let lib = UccLib::init().unwrap();
+    /// # let ctx = UccContext::new(lib).unwrap();
+    /// # let team = UccTeam::new(ctx).unwrap();
+    /// let sendbuf = vec![1u8; 1024];
+    /// let mut recvbuf = vec![0u8; 1024];
+    /// let mut req = team.reduce(&sendbuf, &mut recvbuf, DataType::Uchar, ReductionOp::Sum, 0).unwrap();
+    /// while !req.test().unwrap_or(false) {
+    ///     // progress...
+    /// }
+    /// ```
+    #[must_use = "Result should be checked"]
+    pub fn reduce(
+        &self,
+        sendbuf: &[u8],
+        recvbuf: &mut [u8],
+        datatype: DataType,
+        op: ReductionOp,
+        root: u32,
+    ) -> Result<UccCollectiveRequest, UccStatus> {
+        use crate::bindings::{
+            ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
+            ucc_coll_type_t_UCC_COLL_TYPE_REDUCE, ucc_collective_init_and_post,
+            ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
+        };
+
+        let count = (sendbuf.len() / datatype.size_in_bytes()) as u64;
+        let src_ptr = sendbuf.as_ptr() as *mut std::os::raw::c_void;
+        let dst_ptr = recvbuf.as_mut_ptr() as *mut std::os::raw::c_void;
+
+        // Safety: ucc_coll_args is a POD struct; we initialize all fields explicitly.
+        let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
+        args.coll_type = ucc_coll_type_t_UCC_COLL_TYPE_REDUCE;
+        args.src.info.buffer = src_ptr;
+        args.dst.info.buffer = dst_ptr;
+        args.src.info.count = count;
+        args.src.info.datatype = datatype.as_raw();
+        args.dst.info.count = count;
+        args.dst.info.datatype = datatype.as_raw();
+        args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.op = op.as_raw();
+        args.root = root as u64;
+        args.tag = 0 as ucc_coll_id_t;
+        args.flags = 0;
+        args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
+        args.cb = ucc_coll_callback {
+            cb: None,
+            data: std::ptr::null_mut(),
+        };
+        args.timeout = 0.0;
+
+        let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
+        let status = unsafe {
+            // Safety: args is a valid mutable reference; coll_req is a valid output pointer;
+            // self.inner.handle is a valid team handle.
+            ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle)
+        };
+        check_status(status)?;
+        if coll_req.is_null() {
+            return Err(UccStatus::Known(UccError::ErrNoResource));
+        }
+        Ok(UccCollectiveRequest { request: coll_req })
+    }
 }
 
 impl Drop for UccTeam {
@@ -416,6 +717,110 @@ mod tests {
             let team = UccTeam::new(ctx).expect("team create");
             let size = team.size().expect("team size query");
             assert!(size > 0, "Team size should be > 0, got {}", size);
+        }
+
+        /// Integration test: barrier collective posts and completes
+        ///
+        /// #[ignore] — UCC `ucc_collective_init_and_post` returns
+        /// `UCC_ERR_NOT_IMPLEMENTED` on a single-process team without
+        /// multi-process OOB configuration. Requires a DVM (prrte) for
+        /// multi-rank execution.
+        #[test]
+        #[ignore]
+        fn integration_barrier() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx.clone()).expect("team create");
+            let req = team.barrier().expect("barrier post");
+            let mut iterations = 0;
+            while !req.test().unwrap_or(false) {
+                ctx.progress();
+                iterations += 1;
+                if iterations > 10000 {
+                    break;
+                }
+            }
+            assert!(iterations < 10000, "Barrier should complete");
+        }
+
+        /// Integration test: allgather collective posts and completes
+        ///
+        /// #[ignore] — UCC `ucc_collective_init_and_post` returns
+        /// `UCC_ERR_NOT_IMPLEMENTED` on a single-process team without
+        /// multi-process OOB configuration. Requires a DVM (prrte).
+        #[test]
+        #[ignore]
+        fn integration_allgather() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx.clone()).expect("team create");
+            let sendbuf = [42u8; 64];
+            let mut recvbuf = vec![0u8; 64];
+            let req = team
+                .allgather(&sendbuf, &mut recvbuf, DataType::Uchar)
+                .expect("allgather post");
+            let mut iterations = 0;
+            while !req.test().unwrap_or(false) {
+                ctx.progress();
+                iterations += 1;
+                if iterations > 10000 {
+                    break;
+                }
+            }
+            assert!(iterations < 10000, "Allgather should complete");
+        }
+
+        /// Integration test: bcast collective posts and completes
+        ///
+        /// #[ignore] — UCC `ucc_collective_init_and_post` returns
+        /// `UCC_ERR_NOT_IMPLEMENTED` on a single-process team without
+        /// multi-process OOB configuration. Requires a DVM (prrte).
+        #[test]
+        #[ignore]
+        fn integration_bcast() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx.clone()).expect("team create");
+            let mut buf = vec![42u8; 128];
+            let req = team
+                .bcast(&mut buf, DataType::Uchar, 0)
+                .expect("bcast post");
+            let mut iterations = 0;
+            while !req.test().unwrap_or(false) {
+                ctx.progress();
+                iterations += 1;
+                if iterations > 10000 {
+                    break;
+                }
+            }
+            assert!(iterations < 10000, "Bcast should complete");
+        }
+
+        /// Integration test: reduce collective posts and completes
+        ///
+        /// #[ignore] — UCC `ucc_collective_init_and_post` returns
+        /// `UCC_ERR_NOT_IMPLEMENTED` on a single-process team without
+        /// multi-process OOB configuration. Requires a DVM (prrte).
+        #[test]
+        #[ignore]
+        fn integration_reduce() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx.clone()).expect("team create");
+            let sendbuf = vec![1u8; 64];
+            let mut recvbuf = vec![0u8; 64];
+            let req = team
+                .reduce(&sendbuf, &mut recvbuf, DataType::Uchar, ReductionOp::Sum, 0)
+                .expect("reduce post");
+            let mut iterations = 0;
+            while !req.test().unwrap_or(false) {
+                ctx.progress();
+                iterations += 1;
+                if iterations > 10000 {
+                    break;
+                }
+            }
+            assert!(iterations < 10000, "Reduce should complete");
         }
     }
 }
