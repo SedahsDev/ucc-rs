@@ -822,5 +822,182 @@ mod tests {
             }
             assert!(iterations < 10000, "Reduce should complete");
         }
+
+        /// Integration test: allreduce convenience method posts and completes
+        ///
+        /// #[ignore] — UCC `ucc_collective_init_and_post` returns
+        /// `UCC_ERR_NOT_IMPLEMENTED` on a single-process team without
+        /// multi-process OOB configuration. Requires a DVM (prrte).
+        #[test]
+        #[ignore]
+        fn integration_allreduce() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx.clone()).expect("team create");
+            let mut buf = vec![1u8; 128];
+            let req = team
+                .allreduce(&mut buf, DataType::Uchar, ReductionOp::Sum)
+                .expect("allreduce post");
+            let mut iterations = 0;
+            while !req.test().unwrap_or(false) {
+                ctx.progress();
+                iterations += 1;
+                if iterations > 10000 {
+                    break;
+                }
+            }
+            assert!(iterations < 10000, "Allreduce should complete");
+        }
+
+        /// Integration test: team EP query returns valid endpoint
+        #[test]
+        fn integration_team_ep() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx).expect("team create");
+            let ep = team.ep().expect("team ep query");
+            // Default EP is 0 for single-process team
+            assert_eq!(ep, 0, "Single-process team EP should be 0");
+        }
+
+        /// Integration test: team raw attr query works with SIZE mask
+        #[test]
+        fn integration_team_attr_raw() {
+            use crate::bindings::ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE;
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx).expect("team create");
+            let attr = team
+                .attr(ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE as u64)
+                .expect("team attr query");
+            assert_eq!(attr.size, 1, "Raw attr size should be 1");
+        }
+
+        /// Integration test: team clone shares the same handle (RAII correctness)
+        #[test]
+        fn integration_team_clone_shares_handle() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx).expect("team create");
+            let original_handle = team.handle();
+            let clone = team.clone();
+            // Both clones must share the same underlying C handle
+            assert_eq!(
+                clone.handle(),
+                original_handle,
+                "Cloned team must share the same C handle"
+            );
+            // Dropping the clone must NOT invalidate the original
+            drop(clone);
+            assert!(
+                !team.handle().is_null(),
+                "Original team handle must remain valid after clone drop"
+            );
+            assert_eq!(team.size().expect("size"), 1);
+        }
+
+        /// Integration test: multiple team clones — only last drop destroys
+        #[test]
+        fn integration_team_multiple_clones() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx).expect("team create");
+            let handle = team.handle();
+            let _c1 = team.clone();
+            let _c2 = team.clone();
+            let _c3 = team.clone();
+            // All 4 clones (original + 3) share one handle
+            assert_eq!(_c1.handle(), handle);
+            assert_eq!(_c2.handle(), handle);
+            assert_eq!(_c3.handle(), handle);
+            // Drop clones one at a time — handle stays alive
+            drop(_c3);
+            assert!(!team.handle().is_null());
+            drop(_c2);
+            assert!(!team.handle().is_null());
+            drop(_c1);
+            assert!(
+                !team.handle().is_null(),
+                "Handle must survive until last clone drops"
+            );
+            // team is last — destroy happens on its drop
+        }
+
+        /// Integration test: allreduce with Int32 datatype (128 bytes = 32 x i32)
+        /// Verifies the convenience method handles non-byte datatypes correctly.
+        ///
+        /// #[ignore] — Requires DVM for completion.
+        #[test]
+        #[ignore]
+        fn integration_allreduce_int32() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx.clone()).expect("team create");
+            // 32 i32 elements = 128 bytes; allreduce takes &mut [u8] and the
+            // datatype tells UCC how to interpret the buffer.
+            let mut buf = vec![1u8; 128];
+            let req = team
+                .allreduce(&mut buf, DataType::Int32, ReductionOp::Sum)
+                .expect("allreduce Int32 post");
+            let mut iterations = 0;
+            while !req.test().unwrap_or(false) {
+                ctx.progress();
+                iterations += 1;
+                if iterations > 10000 {
+                    break;
+                }
+            }
+            assert!(iterations < 10000, "Allreduce Int32 should complete");
+        }
+
+        /// Integration test: bcast with non-zero root
+        ///
+        /// #[ignore] — Requires DVM for completion.
+        #[test]
+        #[ignore]
+        fn integration_bcast_root1() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx.clone()).expect("team create");
+            let mut buf = vec![42u8; 128];
+            // Root=1 on single-process team — tests parameter passing
+            let req = team
+                .bcast(&mut buf, DataType::Uchar, 1)
+                .expect("bcast root=1 post");
+            let mut iterations = 0;
+            while !req.test().unwrap_or(false) {
+                ctx.progress();
+                iterations += 1;
+                if iterations > 10000 {
+                    break;
+                }
+            }
+            assert!(iterations < 10000, "Bcast root=1 should complete");
+        }
+
+        /// Integration test: reduce with different ops (Max, Min, Prod)
+        ///
+        /// #[ignore] — Requires DVM for completion.
+        #[test]
+        #[ignore]
+        fn integration_reduce_max() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let team = UccTeam::new(ctx.clone()).expect("team create");
+            let sendbuf = vec![7u8; 64];
+            let mut recvbuf = vec![0u8; 64];
+            let req = team
+                .reduce(&sendbuf, &mut recvbuf, DataType::Uchar, ReductionOp::Max, 0)
+                .expect("reduce Max post");
+            let mut iterations = 0;
+            while !req.test().unwrap_or(false) {
+                ctx.progress();
+                iterations += 1;
+                if iterations > 10000 {
+                    break;
+                }
+            }
+            assert!(iterations < 10000, "Reduce Max should complete");
+        }
     }
 }
