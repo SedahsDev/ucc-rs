@@ -1,0 +1,12 @@
+# Prefer:
+#   export UCC_PREFIX=/path/to/ucc
+#   export UCX_PREFIX=/path/to/ucx
+#   export LD_LIBRARY_PATH=$UCC_PREFIX/lib:$UCX_PREFIX/lib:$LD_LIBRARY_PATH
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-C", "target-cpu=native",
+    # "-L", "/path/to/ucc/lib",
+    # "-L", "/path/to/ucx/lib",
+    # "-C", "link-arg=-Wl,-rpath,/path/to/ucc/lib",
+]

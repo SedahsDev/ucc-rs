@@ -3,7 +3,11 @@ name = "ucc"
 version = "0.1.0"
 edition = "2021"
 description = "Safe Rust bindings for UCC (Unified Collective Communication)"
-license = "BSD"
+license = "BSD-3-Clause"
+readme = "README.md"
+keywords = ["ucc", "hpc", "collectives", "ucx"]
+categories = ["api-bindings", "science"]
+repository = "https://github.com/KirgenR/ucc-rs"
 
 [build-dependencies]
 bindgen = "0.70.1"
@@ -12,7 +16,7 @@ bindgen = "0.70.1"
 libc = "0.2"
 
 # Optional: integrate with ucx-rs for tl/ucp path
-ucx-sys = { path = "../ucx/bindings/rust", optional = true }
+ucx-sys = { path = "../ucx-rs", optional = true }
 
 [dev-dependencies]
 static_assertions = "1"

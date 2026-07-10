@@ -20,7 +20,6 @@ use crate::bindings::{
     ucc_reduction_op_t_UCC_OP_MAX, ucc_reduction_op_t_UCC_OP_MIN, ucc_reduction_op_t_UCC_OP_PROD,
     ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t_UCC_ERR_NO_MESSAGE, ucc_status_t_UCC_OK,
 };
-use crate::memory::UccMemHandle;
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
 
@@ -198,35 +197,43 @@ impl Drop for UccCollectiveRequest {
 /// operations. Use the builder pattern to set all required fields,
 /// then call `init()` or `init_and_post()` to execute.
 ///
+/// Buffer pointers come from borrowed slices. Lifetime `'a` ties the
+/// builder to those buffers for construction; callers must also keep the
+/// buffers alive until the collective request is finalized (UCC does not
+/// copy payload data).
+///
 /// # Example
 ///
 /// ```no_run
-/// # use ucc::{lib_init::UccLib, context::UccContext, team::UccTeam, memory::UccMemHandle, collective::{CollectiveBuilder, UccCollectiveType, UccReductionOp}};
+/// # use ucc::{lib_init::UccLib, context::UccContext, team::UccTeam, collective::{CollectiveBuilder, UccCollectiveType, UccReductionOp, DataType}};
 /// # let lib = UccLib::init().unwrap();
 /// # let ctx = UccContext::new(lib.clone()).unwrap();
 /// # let team = UccTeam::new(ctx.clone()).unwrap();
-/// # let buf = UccMemHandle::map_slice(&ctx, &[0u8; 1024]).unwrap();
+/// let mut buf = vec![1u8; 256];
 /// let coll = CollectiveBuilder::new(UccCollectiveType::Allreduce)
-///     .with_src(&buf)
-///     .with_dst(&buf)
+///     .with_inplace(&mut buf)
 ///     .with_count(256)
+///     .with_dtype(DataType::Uchar.as_raw() as u32)
 ///     .with_reduction_op(UccReductionOp::Sum)
 ///     .init(&team)
 ///     .unwrap();
 /// ```
-pub struct CollectiveBuilder {
+pub struct CollectiveBuilder<'a> {
     coll_type: UccCollectiveType,
-    src: Option<usize>, // UccMemHandle address as usize — avoids Clone requirement
-    dst: Option<usize>,
+    /// Host buffer pointer for `src.info.buffer` (live until coll completes).
+    src: Option<*mut std::os::raw::c_void>,
+    /// Host buffer pointer for `dst.info.buffer` (live until coll completes).
+    dst: Option<*mut std::os::raw::c_void>,
     count: Option<u64>,
     datatype: Option<u32>,
     reduction_op: Option<UccReductionOp>,
     root: Option<u64>,
     tag: Option<u16>,
     flags: u64,
+    _bufs: std::marker::PhantomData<&'a mut ()>,
 }
 
-impl CollectiveBuilder {
+impl<'a> CollectiveBuilder<'a> {
     /// Create a new collective builder with the specified collective type.
     pub fn new(coll_type: UccCollectiveType) -> Self {
         Self {
@@ -239,18 +246,51 @@ impl CollectiveBuilder {
             root: None,
             tag: None,
             flags: 0,
+            _bufs: std::marker::PhantomData,
         }
     }
 
-    /// Set the source buffer.
-    pub fn with_src(mut self, src: &UccMemHandle) -> Self {
-        self.src = Some(src.handle() as usize);
+    /// Set the source buffer from an immutable byte slice.
+    ///
+    /// The memory must remain valid until the collective request is finalized.
+    pub fn with_src(mut self, src: &'a [u8]) -> Self {
+        self.src = Some(src.as_ptr() as *mut std::os::raw::c_void);
         self
     }
 
-    /// Set the destination buffer.
-    pub fn with_dst(mut self, dst: &UccMemHandle) -> Self {
-        self.dst = Some(dst.handle() as usize);
+    /// Set the destination buffer from a mutable byte slice.
+    ///
+    /// The memory must remain valid until the collective request is finalized.
+    pub fn with_dst(mut self, dst: &'a mut [u8]) -> Self {
+        self.dst = Some(dst.as_mut_ptr() as *mut std::os::raw::c_void);
+        self
+    }
+
+    /// Set both source and destination to the same in-place buffer.
+    pub fn with_inplace(mut self, buf: &'a mut [u8]) -> Self {
+        let ptr = buf.as_mut_ptr() as *mut std::os::raw::c_void;
+        self.src = Some(ptr);
+        self.dst = Some(ptr);
+        self
+    }
+
+    /// Set a raw source pointer (advanced).
+    ///
+    /// # Safety
+    /// `src` must point to a valid host buffer that remains live until the
+    /// collective request is finalized.
+    pub unsafe fn with_src_ptr(mut self, src: *mut std::os::raw::c_void) -> Self {
+        self.src = Some(src);
+        self
+    }
+
+    /// Set a raw destination pointer (advanced).
+    ///
+    /// # Safety
+    /// `dst` must point to a valid host buffer that remains live until the
+    /// collective request is finalized.
+    pub unsafe fn with_dst_ptr(mut self, dst: *mut std::os::raw::c_void) -> Self {
+        self.dst = Some(dst);
         self
     }
 
@@ -260,7 +300,7 @@ impl CollectiveBuilder {
         self
     }
 
-    /// Set the data type (as raw u32).
+    /// Set the data type (as raw u32 / UCC datatype ordinal).
     pub fn with_dtype(mut self, dt: u32) -> Self {
         self.datatype = Some(dt);
         self
@@ -298,9 +338,7 @@ impl CollectiveBuilder {
         let mut args = self.build_args()?;
         let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
         let status = unsafe {
-            // Safety: args is a valid mutable reference, coll_req is a valid output pointer,
-            // team.handle() is a valid team handle.
-            // ucc_collective_init takes *mut ucc_coll_args (mutable ref)
+            // SAFETY: args is fully initialized POD; team handle is valid.
             ucc_collective_init(&mut args, &mut coll_req, team.handle())
         };
         check_status(status)?;
@@ -323,8 +361,7 @@ impl CollectiveBuilder {
         let mut args = self.build_args()?;
         let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
         let status = unsafe {
-            // Safety: args is a valid mutable reference, coll_req is a valid output pointer,
-            // team.handle() is a valid team handle.
+            // SAFETY: args is fully initialized POD; team handle is valid.
             ucc_collective_init_and_post(&mut args, &mut coll_req, team.handle())
         };
         check_status(status)?;
@@ -340,17 +377,20 @@ impl CollectiveBuilder {
 
     /// Build the internal `ucc_coll_args` struct from builder state.
     fn build_args(&self) -> Result<ucc_coll_args, UccStatus> {
-        let src = self.src.expect("Source buffer must be set");
-        let dst = self.dst.expect("Destination buffer must be set");
+        let src = self
+            .src
+            .ok_or(UccStatus::Known(UccError::ErrInvalidParam))?;
+        let dst = self
+            .dst
+            .ok_or(UccStatus::Known(UccError::ErrInvalidParam))?;
         let count = self.count.unwrap_or(1);
-        let datatype = self.datatype.unwrap_or(4); // default to u32
+        let datatype = self.datatype.unwrap_or(DataType::Uint8.as_raw() as u32);
 
-        // Safety: ucc_coll_args is a POD struct; we initialize all fields explicitly.
+        // SAFETY: ucc_coll_args is a POD struct; we initialize all fields explicitly.
         let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
         args.coll_type = self.coll_type.as_raw();
-        // Access the union's `info` field (ucc_coll_buffer_info)
-        args.src.info.buffer = src as *mut std::os::raw::c_void;
-        args.dst.info.buffer = dst as *mut std::os::raw::c_void;
+        args.src.info.buffer = src;
+        args.dst.info.buffer = dst;
         args.src.info.count = count;
         args.src.info.datatype = datatype as ucc_datatype_t;
         args.dst.info.count = count;

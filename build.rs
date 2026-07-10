@@ -1,33 +1,60 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Discover UCC include/lib dirs.
+/// Order: UCC_PREFIX → UCC_INCLUDE_DIR/UCC_LIB_DIR → common prefixes → /usr
+fn discover_ucc() -> (PathBuf, PathBuf) {
+    println!("cargo:rerun-if-env-changed=UCC_PREFIX");
+    println!("cargo:rerun-if-env-changed=UCC_INCLUDE_DIR");
+    println!("cargo:rerun-if-env-changed=UCC_LIB_DIR");
+
+    if let Ok(prefix) = env::var("UCC_PREFIX") {
+        let prefix = PathBuf::from(prefix);
+        return (prefix.join("include"), prefix.join("lib"));
+    }
+
+    let include = env::var("UCC_INCLUDE_DIR").ok().map(PathBuf::from);
+    let lib = env::var("UCC_LIB_DIR").ok().map(PathBuf::from);
+    if let (Some(inc), Some(lib)) = (include, lib) {
+        return (inc, lib);
+    }
+
+    let candidates = ["/usr", "/usr/local", "/opt/ucc"];
+    for c in candidates {
+        let p = Path::new(c);
+        let inc = p.join("include");
+        let lib = p.join("lib");
+        if inc.join("ucc").join("api").join("ucc.h").exists()
+            || inc.join("ucc.h").exists()
+            || lib.join("libucc.so").exists()
+            || lib.join("libucc.so.1").exists()
+        {
+            return (inc, lib);
+        }
+    }
+
+    (PathBuf::from("/usr/include"), PathBuf::from("/usr/lib"))
+}
 
 fn main() {
-    let ucc_prefix = env::var("UCC_PREFIX").unwrap_or_else(|_| "/home/bzf/.local/ucc".to_string());
-    let ucc_include = PathBuf::from(&ucc_prefix).join("include");
-    let ucc_lib = PathBuf::from(&ucc_prefix).join("lib");
+    let (include_dir, lib_dir) = discover_ucc();
 
-    println!("cargo:rustc-link-search={}", ucc_lib.display());
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=ucc");
-    // Set rpath so the runtime linker can find libucc.so.1
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", ucc_lib.display());
-    println!("cargo:rerun-if-env-changed=UCC_PREFIX");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
     println!("cargo:rerun-if-changed=wrapper.h");
 
     let src_path = PathBuf::from("src").join("bindings.rs");
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("bindings.rs");
 
-    // Try to generate bindings with bindgen; fall back to pre-generated src/bindings.rs
-    let bindings_generated = bindgen::Builder::default()
+    let mut builder = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_arg(format!("-I{}", ucc_include.display()))
+        .clang_arg(format!("-I{}", include_dir.display()))
         // Generate constants for ALL enums (anonymous and named)
-        // This turns enum variants into pub const UCC_* values
         .constified_enum(".+")
-        // Allow UCC types, functions, and generated constants
         .allowlist_type("ucc_.*|FILE|size_t|uint.*|int.*|c_.*|va_list")
         .allowlist_function("ucc_.*")
         .allowlist_var("UCC_.*|ucc_.*")
-        // Generate proper Rust types
         .layout_tests(false)
         .derive_copy(true)
         .derive_debug(true)
@@ -39,27 +66,34 @@ fn main() {
         .raw_line("#![allow(dead_code)]")
         .raw_line("#![allow(clippy::all)]")
         .raw_line("#![allow(unused_unsafe)]")
-        .raw_line("#![allow(unnecessary_transmutes)]")
-        .generate();
+        .raw_line("#![allow(unnecessary_transmutes)]");
 
-    match bindings_generated {
+    // Some installs nest headers under include/ucc/api
+    let nested = include_dir.join("ucc").join("api");
+    if nested.exists() {
+        builder = builder.clang_arg(format!("-I{}", nested.display()));
+    }
+
+    match builder.generate() {
         Ok(bindings) => {
             println!("cargo:warning=bindgen succeeded — generating fresh UCC bindings");
             bindings
                 .write_to_file(&out_path)
                 .expect("Failed to write bindings to OUT_DIR");
-            std::fs::copy(&out_path, &src_path).expect("Failed to copy bindings to src/");
+            let _ = std::fs::copy(&out_path, &src_path);
         }
         Err(e) => {
-            println!("cargo:warning=bindgen failed ({}) — using pre-generated src/bindings.rs as fallback", e);
+            println!(
+                "cargo:warning=bindgen failed ({e}) — using pre-generated src/bindings.rs as fallback"
+            );
             if src_path.exists() {
-                // Copy pre-generated bindings to OUT_DIR so compilation proceeds
                 std::fs::copy(&src_path, &out_path)
                     .expect("Failed to copy fallback bindings to OUT_DIR");
             } else {
                 panic!(
                     "bindgen failed and no pre-generated src/bindings.rs found.\n\
-                     Please install libclang-dev or run bindgen manually to generate src/bindings.rs."
+                     Set UCC_PREFIX (or UCC_INCLUDE_DIR + UCC_LIB_DIR), install libclang-dev,\n\
+                     or provide src/bindings.rs."
                 );
             }
         }

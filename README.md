@@ -1,43 +1,73 @@
-# ucc-rs
+# ucc
 
 Safe Rust bindings for [UCC](https://github.com/openucx/ucc) (Unified Collective Communication).
 
-## Overview
+## Features
 
-UCC provides native collective operations built on top of UCX. This crate provides:
-- Auto-generated FFI bindings (via bindgen)
-- Safe Rust wrappers for the full UCC lifecycle
+- RAII handles: `UccLib`, `UccContext`, `UccTeam`, collectives, memory map
+- Type-safe status (`UccError` / `UccStatus`), datatypes, reduction ops
+- Team convenience methods: `barrier`, `allreduce`, `allgather`, `bcast`, `reduce`
+- `CollectiveBuilder` with borrow-checked buffer slices
+- Optional `ucx-integration` feature (path dep on `ucx-sys`)
 
-## UCC API Lifecycle
-
-```
-ucc_init_version() → UccLib
-    └─ ucc_context_create() → UccContext
-        └─ ucc_team_create_post() + ucc_team_create_test() → UccTeam
-            ├─ ucc_collective_init() + ucc_collective_post() → UccCollRequest
-            │   └─ ucc_collective_finalize() -- cleanup
-            └─ ucc_ee_create() → UccExecutionEngine (for triggered collectives)
-```
-
-## Building
-
-Requires UCC library installed. Set `UCC_PREFIX` or use default `/home/bzf/.local/ucc/`.
+## Build
 
 ```bash
+export UCC_PREFIX=/path/to/ucc
+export UCX_PREFIX=/path/to/ucx   # often needed at runtime for UCC TLs
+export LD_LIBRARY_PATH=$UCC_PREFIX/lib:$UCX_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 cargo build
+cargo test
+cargo run --example lib_init_version
 ```
 
-## Modules
+Also: `UCC_INCLUDE_DIR` + `UCC_LIB_DIR`. Fallbacks: `/usr`, `/usr/local`, `/opt/ucc` (not home paths).
 
-- `status` - UCC status codes and error handling
-- `lib_init` - Library initialization (`UccLib`)
-- `context` - Context creation (`UccContext`)
-- `team` - Team creation and management (`UccTeam`)
-- `collective` - Collective operations (barrier, bcast, allreduce, etc.)
-- `event_engine` - Execution Engine for triggered collectives
-- `memory` - Memory mapping for UCC operations
+See [`../BUILDING.md`](../BUILDING.md).
 
-## Non-blocking Design
+## Lifecycle
 
-All collectives return a `UccCollRequest` that must be polled via `test()` or `wait()`.
-This follows the user preference for non-blocking I/O patterns throughout.
+```
+UccLib::init()
+  └─ UccContext::new(lib)
+      └─ UccTeam::new(ctx)
+          └─ team.barrier() / allreduce(...) / CollectiveBuilder ...
+```
+
+## Minimal examples
+
+Library init + version (always works if libucc is installed):
+
+```rust
+use ucc::lib_init::{ucc_version_string, UccLib};
+
+fn main() {
+    println!("{}", ucc_version_string());
+    let _lib = UccLib::init().expect("ucc init");
+}
+```
+
+Single-rank team barrier sketch (multi-rank collectives usually need OOB + DVM):
+
+```rust
+use ucc::context::UccContext;
+use ucc::lib_init::UccLib;
+use ucc::team::UccTeam;
+
+fn main() {
+    let lib = UccLib::init().unwrap();
+    let ctx = UccContext::new(lib).unwrap();
+    let team = UccTeam::new(ctx.clone()).unwrap();
+    // Multi-process barrier often needs prterun + OOB; see REVIEW.md
+    let _ = team;
+}
+```
+
+## Safety notes
+
+- Keep collective buffers alive until requests complete.
+- `CollectiveBuilder` ties buffer slices to a lifetime and takes raw host pointers for UCC.
+
+## License
+
+BSD-style (see `LICENSE`). See [`REVIEW.md`](./REVIEW.md) for full review.

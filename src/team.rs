@@ -541,6 +541,200 @@ impl UccTeam {
         }
         Ok(UccCollectiveRequest { request: coll_req })
     }
+
+    /// Non-blocking gather: all ranks send, root receives.
+    #[must_use = "Result should be checked"]
+    pub fn gather(
+        &self,
+        sendbuf: &[u8],
+        recvbuf: &mut [u8],
+        datatype: DataType,
+        root: u32,
+    ) -> Result<UccCollectiveRequest, UccStatus> {
+        use crate::bindings::{
+            ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
+            ucc_coll_type_t_UCC_COLL_TYPE_GATHER, ucc_collective_init_and_post,
+            ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
+        };
+
+        let count = (sendbuf.len() / datatype.size_in_bytes().max(1)) as u64;
+        let src_ptr = sendbuf.as_ptr() as *mut std::os::raw::c_void;
+        let dst_ptr = recvbuf.as_mut_ptr() as *mut std::os::raw::c_void;
+
+        let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
+        args.coll_type = ucc_coll_type_t_UCC_COLL_TYPE_GATHER;
+        args.src.info.buffer = src_ptr;
+        args.dst.info.buffer = dst_ptr;
+        args.src.info.count = count;
+        args.src.info.datatype = datatype.as_raw();
+        args.dst.info.count = count;
+        args.dst.info.datatype = datatype.as_raw();
+        args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.root = root as u64;
+        args.tag = 0 as ucc_coll_id_t;
+        args.flags = 0;
+        args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
+        args.cb = ucc_coll_callback {
+            cb: None,
+            data: std::ptr::null_mut(),
+        };
+        args.timeout = 0.0;
+
+        let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
+        let status =
+            unsafe { ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle) };
+        check_status(status)?;
+        if coll_req.is_null() {
+            return Err(UccStatus::Known(UccError::ErrNoResource));
+        }
+        Ok(UccCollectiveRequest { request: coll_req })
+    }
+
+    /// Non-blocking scatter: root sends, all ranks receive.
+    #[must_use = "Result should be checked"]
+    pub fn scatter(
+        &self,
+        sendbuf: &[u8],
+        recvbuf: &mut [u8],
+        datatype: DataType,
+        root: u32,
+    ) -> Result<UccCollectiveRequest, UccStatus> {
+        use crate::bindings::{
+            ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
+            ucc_coll_type_t_UCC_COLL_TYPE_SCATTER, ucc_collective_init_and_post,
+            ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
+        };
+
+        let count = (recvbuf.len() / datatype.size_in_bytes().max(1)) as u64;
+        let src_ptr = sendbuf.as_ptr() as *mut std::os::raw::c_void;
+        let dst_ptr = recvbuf.as_mut_ptr() as *mut std::os::raw::c_void;
+
+        let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
+        args.coll_type = ucc_coll_type_t_UCC_COLL_TYPE_SCATTER;
+        args.src.info.buffer = src_ptr;
+        args.dst.info.buffer = dst_ptr;
+        args.src.info.count = count;
+        args.src.info.datatype = datatype.as_raw();
+        args.dst.info.count = count;
+        args.dst.info.datatype = datatype.as_raw();
+        args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.root = root as u64;
+        args.tag = 0 as ucc_coll_id_t;
+        args.flags = 0;
+        args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
+        args.cb = ucc_coll_callback {
+            cb: None,
+            data: std::ptr::null_mut(),
+        };
+        args.timeout = 0.0;
+
+        let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
+        let status =
+            unsafe { ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle) };
+        check_status(status)?;
+        if coll_req.is_null() {
+            return Err(UccStatus::Known(UccError::ErrNoResource));
+        }
+        Ok(UccCollectiveRequest { request: coll_req })
+    }
+
+    /// Non-blocking alltoall.
+    #[must_use = "Result should be checked"]
+    pub fn alltoall(
+        &self,
+        sendbuf: &[u8],
+        recvbuf: &mut [u8],
+        datatype: DataType,
+    ) -> Result<UccCollectiveRequest, UccStatus> {
+        use crate::bindings::{
+            ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
+            ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALL, ucc_collective_init_and_post,
+            ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
+        };
+
+        let count = (sendbuf.len() / datatype.size_in_bytes().max(1)) as u64;
+        let src_ptr = sendbuf.as_ptr() as *mut std::os::raw::c_void;
+        let dst_ptr = recvbuf.as_mut_ptr() as *mut std::os::raw::c_void;
+
+        let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
+        args.coll_type = ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALL;
+        args.src.info.buffer = src_ptr;
+        args.dst.info.buffer = dst_ptr;
+        args.src.info.count = count;
+        args.src.info.datatype = datatype.as_raw();
+        args.dst.info.count = count;
+        args.dst.info.datatype = datatype.as_raw();
+        args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.tag = 0 as ucc_coll_id_t;
+        args.flags = 0;
+        args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
+        args.cb = ucc_coll_callback {
+            cb: None,
+            data: std::ptr::null_mut(),
+        };
+        args.timeout = 0.0;
+
+        let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
+        let status =
+            unsafe { ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle) };
+        check_status(status)?;
+        if coll_req.is_null() {
+            return Err(UccStatus::Known(UccError::ErrNoResource));
+        }
+        Ok(UccCollectiveRequest { request: coll_req })
+    }
+
+    /// Non-blocking reduce-scatter.
+    #[must_use = "Result should be checked"]
+    pub fn reduce_scatter(
+        &self,
+        sendbuf: &[u8],
+        recvbuf: &mut [u8],
+        datatype: DataType,
+        op: ReductionOp,
+    ) -> Result<UccCollectiveRequest, UccStatus> {
+        use crate::bindings::{
+            ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
+            ucc_coll_type_t_UCC_COLL_TYPE_REDUCE_SCATTER, ucc_collective_init_and_post,
+            ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
+        };
+
+        let count = (recvbuf.len() / datatype.size_in_bytes().max(1)) as u64;
+        let src_ptr = sendbuf.as_ptr() as *mut std::os::raw::c_void;
+        let dst_ptr = recvbuf.as_mut_ptr() as *mut std::os::raw::c_void;
+
+        let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
+        args.coll_type = ucc_coll_type_t_UCC_COLL_TYPE_REDUCE_SCATTER;
+        args.src.info.buffer = src_ptr;
+        args.dst.info.buffer = dst_ptr;
+        args.src.info.count = count;
+        args.src.info.datatype = datatype.as_raw();
+        args.dst.info.count = count;
+        args.dst.info.datatype = datatype.as_raw();
+        args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
+        args.op = op.as_raw();
+        args.tag = 0 as ucc_coll_id_t;
+        args.flags = 0;
+        args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
+        args.cb = ucc_coll_callback {
+            cb: None,
+            data: std::ptr::null_mut(),
+        };
+        args.timeout = 0.0;
+
+        let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
+        let status =
+            unsafe { ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle) };
+        check_status(status)?;
+        if coll_req.is_null() {
+            return Err(UccStatus::Known(UccError::ErrNoResource));
+        }
+        Ok(UccCollectiveRequest { request: coll_req })
+    }
 }
 
 impl Drop for UccTeam {
