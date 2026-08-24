@@ -173,8 +173,9 @@ impl UccTeam {
     /// Perform a non-blocking allreduce collective operation.
     ///
     /// This is a convenience method that initializes and posts an allreduce
-    /// collective in one step. The operation is in-place — the send buffer
-    /// is modified to contain the reduced result.
+    /// collective in one step. The operation is in-place — the send buffer is
+    /// modified to contain the reduced result and must remain alive until the
+    /// returned request completes.
     ///
     /// # Arguments
     ///
@@ -225,7 +226,7 @@ impl UccTeam {
         args.op = op.as_raw();
         args.root = 0;
         args.tag = 0 as ucc_coll_id_t;
-        args.flags = 0;
+        args.flags = crate::bindings::ucc_coll_args_flags_t_UCC_COLL_ARGS_FLAG_IN_PLACE as u64;
         args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
         args.cb = ucc_coll_callback {
             cb: None,
@@ -274,9 +275,10 @@ impl UccTeam {
             ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
         };
 
-        // UCC requires non-null buffer pointers, so we use a dummy 1-byte buffer.
-        let mut dummy = [0u8; 1];
-        let buf_ptr = dummy.as_mut_ptr() as *mut std::os::raw::c_void;
+        // UCC does not dereference barrier buffers when their counts are zero.
+        // Keep the pointer non-null for implementations that reject NULL, while
+        // avoiding a pointer to a stack allocation that outlives this function.
+        let buf_ptr = std::ptr::NonNull::<u8>::dangling().as_ptr() as *mut std::os::raw::c_void;
 
         // Safety: ucc_coll_args is a POD struct; we initialize all fields explicitly.
         let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
@@ -320,6 +322,7 @@ impl UccTeam {
     ///
     /// Each rank contributes its `sendbuf` data, and all ranks receive
     /// the concatenated contributions from every rank into `recvbuf`.
+    /// `recvbuf` must remain alive until the returned request completes.
     /// The layout in `recvbuf` is contiguous: rank 0's data first, then
     /// rank 1's, and so on.
     ///
@@ -357,7 +360,16 @@ impl UccTeam {
             ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
         };
 
+        let team_size = self.size()?;
         let count = (sendbuf.len() / datatype.size_in_bytes()) as u64;
+        let (_, dst_count) = allgather_counts(count, team_size)
+            .ok_or(UccStatus::Known(UccError::ErrInvalidParam))?;
+        let required_bytes = (dst_count as usize)
+            .checked_mul(datatype.size_in_bytes())
+            .ok_or(UccStatus::Known(UccError::ErrInvalidParam))?;
+        if recvbuf.len() < required_bytes {
+            return Err(UccStatus::Known(UccError::ErrInvalidParam));
+        }
         let src_ptr = sendbuf.as_ptr() as *mut std::os::raw::c_void;
         let dst_ptr = recvbuf.as_mut_ptr() as *mut std::os::raw::c_void;
 
@@ -368,7 +380,7 @@ impl UccTeam {
         args.dst.info.buffer = dst_ptr;
         args.src.info.count = count;
         args.src.info.datatype = datatype.as_raw();
-        args.dst.info.count = count;
+        args.dst.info.count = dst_count;
         args.dst.info.datatype = datatype.as_raw();
         args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
         args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
@@ -402,7 +414,10 @@ impl UccTeam {
     /// Perform a non-blocking broadcast collective operation.
     ///
     /// The root rank sends data to all other ranks. This is an in-place
-    /// operation — the same buffer is used for both send and receive.
+    /// operation — the same buffer is used for both send and receive. The
+    /// buffer must remain alive until the returned request completes; this
+    /// convenience API intentionally leaves the in-place flag unset because
+    /// UCC bcast uses the aliased buffer directly for root/non-root roles.
     ///
     /// # Arguments
     ///
@@ -731,7 +746,17 @@ impl UccTeam {
             ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
         };
 
-        let count = (recvbuf.len() / datatype.size_in_bytes().max(1)) as u64;
+        let elem_size = datatype.size_in_bytes().max(1);
+        let count = (recvbuf.len() / elem_size) as u64;
+        let src_count = count
+            .checked_mul(self.size()? as u64)
+            .ok_or(UccStatus::Known(UccError::ErrInvalidParam))?;
+        let required_bytes = (src_count as usize)
+            .checked_mul(elem_size)
+            .ok_or(UccStatus::Known(UccError::ErrInvalidParam))?;
+        if sendbuf.len() < required_bytes {
+            return Err(UccStatus::Known(UccError::ErrInvalidParam));
+        }
         let src_ptr = sendbuf.as_ptr() as *mut std::os::raw::c_void;
         let dst_ptr = recvbuf.as_mut_ptr() as *mut std::os::raw::c_void;
 
@@ -739,7 +764,7 @@ impl UccTeam {
         args.coll_type = ucc_coll_type_t_UCC_COLL_TYPE_REDUCE_SCATTER;
         args.src.info.buffer = src_ptr;
         args.dst.info.buffer = dst_ptr;
-        args.src.info.count = count;
+        args.src.info.count = src_count;
         args.src.info.datatype = datatype.as_raw();
         args.dst.info.count = count;
         args.dst.info.datatype = datatype.as_raw();
@@ -767,6 +792,10 @@ impl UccTeam {
             completed: std::cell::Cell::new(false),
         })
     }
+}
+
+fn allgather_counts(send_elems: u64, team_size: u32) -> Option<(u64, u64)> {
+    Some((send_elems, send_elems.checked_mul(u64::from(team_size))?))
 }
 
 impl Drop for UccTeam {
@@ -884,6 +913,16 @@ mod tests {
     fn test_ucc_team_trait_bounds() {
         // UccTeam is Clone but NOT Send — raw FFI handles don't impl Send
         assert_impl_all!(UccTeam: Clone);
+    }
+
+    #[test]
+    fn allgather_counts_include_every_rank() {
+        assert_eq!(allgather_counts(256, 4), Some((256, 1024)));
+    }
+
+    #[test]
+    fn allgather_counts_overflow_is_rejected() {
+        assert!(u64::MAX.checked_mul(2).is_none());
     }
 
     // ── Integration tests (call into libucc.so) ────────────────────────────
