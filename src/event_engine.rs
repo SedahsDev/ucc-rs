@@ -6,7 +6,7 @@
 
 use crate::bindings::{
     ucc_ee_ack_event, ucc_ee_create, ucc_ee_destroy, ucc_ee_get_event, ucc_ee_h, ucc_ee_params,
-    ucc_ee_set_event,
+    ucc_ee_set_event, ucc_status_t_UCC_ERR_NO_RESOURCE, ucc_status_t_UCC_OK,
 };
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
@@ -149,22 +149,22 @@ impl UccExecutionEngine {
     ///
     /// The returned event pointer must eventually be acknowledged via `ack_event()`
     /// or used with `ucc_collective_triggered_post()`.
+    #[allow(non_upper_case_globals)]
     pub unsafe fn get_event(&self) -> Result<Option<UccEvent>, UccStatus> {
         let mut event: *mut crate::bindings::ucc_ev_t = std::ptr::null_mut();
         // SAFETY: the EE handle is valid for the lifetime of `self`, and UCC
         // writes only the returned event pointer into this valid output slot.
         // The pointed-to event remains owned by UCC until acknowledgement.
         let status = ucc_ee_get_event(self.handle(), &mut event);
-        if status == 0 {
-            // UCC_OK — event was available
-            return Ok((!event.is_null()).then_some(UccEvent { ptr: event }));
+        match status {
+            ucc_status_t_UCC_OK if !event.is_null() => Ok(Some(UccEvent { ptr: event })),
+            ucc_status_t_UCC_OK => {
+                // A successful call with a null event has no event to return.
+                Ok(None)
+            }
+            ucc_status_t_UCC_ERR_NO_RESOURCE => Ok(None),
+            status => Err(check_status(status).expect_err("non-OK status must be an error")),
         }
-        if status == 7 {
-            // UCC_ERR_NO_RESOURCE — no event available right now
-            return Ok(None);
-        }
-        check_status(status)?;
-        Ok((!event.is_null()).then_some(UccEvent { ptr: event }))
     }
 }
 
