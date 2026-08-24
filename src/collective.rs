@@ -152,8 +152,12 @@ impl DataType {
 ///
 /// Returned by convenience methods like [`UccTeam::allreduce`].
 /// Use [`UccCollectiveRequest::test`] to poll for completion.
+///
+/// Dropping an incomplete request intentionally leaks its UCC request rather
+/// than finalizing it while it is in flight, which would be undefined behavior.
 pub struct UccCollectiveRequest {
     pub(crate) request: ucc_coll_req_h,
+    pub(crate) completed: std::cell::Cell<bool>,
 }
 
 impl UccCollectiveRequest {
@@ -172,7 +176,10 @@ impl UccCollectiveRequest {
             (*self.request).status
         };
         match status {
-            ucc_status_t_UCC_OK => Ok(true),
+            ucc_status_t_UCC_OK => {
+                self.completed.set(true);
+                Ok(true)
+            }
             ucc_status_t_UCC_ERR_NO_MESSAGE => Ok(false), // still in progress
             _ => Err(check_status(status)
                 .err()
@@ -183,10 +190,18 @@ impl UccCollectiveRequest {
 
 impl Drop for UccCollectiveRequest {
     fn drop(&mut self) {
-        if !self.request.is_null() {
-            // Safety: request is a valid handle.
+        if !self.request.is_null() && self.completed.get() {
+            // Safety: request is a completed, valid handle.
             let _ = unsafe { ucc_collective_finalize(self.request) };
             self.request = std::ptr::null_mut();
+        } else if !self.request.is_null() {
+            eprintln!(
+                "dropping an incomplete UCC collective request; leaking it to avoid undefined behavior"
+            );
+            debug_assert!(
+                self.completed.get(),
+                "incomplete UCC collective request was dropped"
+            );
         }
     }
 }
@@ -348,6 +363,7 @@ impl<'a> CollectiveBuilder<'a> {
         Ok(UccCollective {
             request: coll_req,
             coll_type: self.coll_type,
+            completed: std::cell::Cell::new(false),
             _team: team.clone(),
         })
     }
@@ -371,6 +387,7 @@ impl<'a> CollectiveBuilder<'a> {
         Ok(UccCollective {
             request: coll_req,
             coll_type: self.coll_type,
+            completed: std::cell::Cell::new(false),
             _team: team.clone(),
         })
     }
@@ -416,12 +433,14 @@ impl<'a> CollectiveBuilder<'a> {
 
 /// An initialized collective operation ready to be posted.
 ///
-/// Holds the collective request handle until the operation
-/// completes. Drop finalizes the collective request.
+/// Holds the collective request handle until the operation completes.
+/// Use [`Self::test`] to record completion. Dropping an incomplete collective
+/// leaks its UCC request rather than finalizing it while in flight (UB).
 #[must_use = "Collective operations should be posted and waited on"]
 pub struct UccCollective {
     request: ucc_coll_req_h,
     coll_type: UccCollectiveType,
+    completed: std::cell::Cell<bool>,
     _team: UccTeam,
 }
 
@@ -475,6 +494,22 @@ impl UccCollective {
         self.request
     }
 
+    /// Test whether this collective has completed and track completion for drop.
+    #[allow(non_upper_case_globals)]
+    pub fn test(&self) -> Result<bool, UccStatus> {
+        let status = unsafe { (*self.request).status };
+        match status {
+            ucc_status_t_UCC_OK => {
+                self.completed.set(true);
+                Ok(true)
+            }
+            ucc_status_t_UCC_ERR_NO_MESSAGE => Ok(false),
+            _ => Err(check_status(status)
+                .err()
+                .unwrap_or(UccStatus::Known(UccError::ErrNoResource))),
+        }
+    }
+
     /// Get the collective type.
     pub fn coll_type(&self) -> UccCollectiveType {
         self.coll_type
@@ -483,11 +518,18 @@ impl UccCollective {
 
 impl Drop for UccCollective {
     fn drop(&mut self) {
-        if !self.request.is_null() {
-            // Safety: request is a valid handle from ucc_collective_init.
-            // We ignore the status here — cleanup on drop should not panic.
+        if !self.request.is_null() && self.completed.get() {
+            // Safety: request is a completed, valid handle.
             let _ = unsafe { ucc_collective_finalize(self.request) };
             self.request = std::ptr::null_mut();
+        } else if !self.request.is_null() {
+            eprintln!(
+                "dropping an incomplete UCC collective; leaking it to avoid undefined behavior"
+            );
+            debug_assert!(
+                self.completed.get(),
+                "incomplete UCC collective was dropped"
+            );
         }
     }
 }

@@ -238,7 +238,10 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest { request: coll_req })
+        Ok(UccCollectiveRequest {
+            request: coll_req,
+            completed: std::cell::Cell::new(false),
+        })
     }
 
     /// Perform a non-blocking barrier collective operation.
@@ -302,7 +305,10 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest { request: coll_req })
+        Ok(UccCollectiveRequest {
+            request: coll_req,
+            completed: std::cell::Cell::new(false),
+        })
     }
 
     /// Perform a non-blocking allgather collective operation.
@@ -382,7 +388,10 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest { request: coll_req })
+        Ok(UccCollectiveRequest {
+            request: coll_req,
+            completed: std::cell::Cell::new(false),
+        })
     }
 
     /// Perform a non-blocking broadcast collective operation.
@@ -458,7 +467,10 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest { request: coll_req })
+        Ok(UccCollectiveRequest {
+            request: coll_req,
+            completed: std::cell::Cell::new(false),
+        })
     }
 
     /// Perform a non-blocking reduce collective operation.
@@ -539,7 +551,10 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest { request: coll_req })
+        Ok(UccCollectiveRequest {
+            request: coll_req,
+            completed: std::cell::Cell::new(false),
+        })
     }
 
     /// Non-blocking gather: all ranks send, root receives.
@@ -588,7 +603,10 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest { request: coll_req })
+        Ok(UccCollectiveRequest {
+            request: coll_req,
+            completed: std::cell::Cell::new(false),
+        })
     }
 
     /// Non-blocking scatter: root sends, all ranks receive.
@@ -637,7 +655,10 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest { request: coll_req })
+        Ok(UccCollectiveRequest {
+            request: coll_req,
+            completed: std::cell::Cell::new(false),
+        })
     }
 
     /// Non-blocking alltoall.
@@ -684,7 +705,10 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest { request: coll_req })
+        Ok(UccCollectiveRequest {
+            request: coll_req,
+            completed: std::cell::Cell::new(false),
+        })
     }
 
     /// Non-blocking reduce-scatter.
@@ -733,7 +757,10 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest { request: coll_req })
+        Ok(UccCollectiveRequest {
+            request: coll_req,
+            completed: std::cell::Cell::new(false),
+        })
     }
 }
 
