@@ -137,10 +137,11 @@ impl UccExecutionEngine {
         });
         let status = ucc_ee_wait(self.handle(), &mut *event);
         check_status(status)?;
-        // SAFETY: UCC fills this caller-provided allocation. It is intentionally
-        // leaked because the event remains valid until UCC acknowledges it.
+        // SAFETY: UCC fills this caller-provided allocation. The allocation is
+        // retained by UccEvent and released when that event is dropped.
         Ok(UccEvent {
-            ptr: Box::into_raw(event),
+            ptr: (&mut *event) as *mut crate::bindings::ucc_ev_t,
+            owned: Some(event),
         })
     }
 
@@ -158,14 +159,20 @@ impl UccExecutionEngine {
         let status = ucc_ee_get_event(self.handle(), &mut event);
         if status == 0 {
             // UCC_OK — event was available
-            return Ok((!event.is_null()).then_some(UccEvent { ptr: event }));
+            return Ok((!event.is_null()).then_some(UccEvent {
+                ptr: event,
+                owned: None,
+            }));
         }
         if status == 7 {
             // UCC_ERR_NO_RESOURCE — no event available right now
             return Ok(None);
         }
         check_status(status)?;
-        Ok((!event.is_null()).then_some(UccEvent { ptr: event }))
+        Ok((!event.is_null()).then_some(UccEvent {
+            ptr: event,
+            owned: None,
+        }))
     }
 }
 
@@ -175,6 +182,7 @@ impl Drop for UccExecutionEngine {
             .map(|inner| std::mem::replace(&mut inner.handle, std::ptr::null_mut()))
             .filter(|h| !h.is_null());
         if let Some(handle) = handle {
+            // SAFETY: handle is the valid, uniquely owned execution-engine handle.
             let _ = unsafe { ucc_ee_destroy(handle) };
         }
     }
@@ -182,15 +190,30 @@ impl Drop for UccExecutionEngine {
 
 /// Event storage returned by the execution engine.
 ///
-/// Waited events own their copied storage; events from `get_event` borrow UCC
-/// storage and UCC releases it when acknowledged. Neither variant frees UCC memory.
+/// Waited events own their caller-provided copied storage and free it on drop.
+/// Events from `get_event` borrow storage owned by UCC; dropping them does not
+/// free that storage, which remains UCC-owned until the event is acknowledged.
 pub struct UccEvent {
     ptr: *mut crate::bindings::ucc_ev_t,
+    owned: Option<Box<crate::bindings::ucc_ev_t>>,
 }
 
 impl UccEvent {
-    fn as_ptr(&self) -> *mut crate::bindings::ucc_ev_t {
+    /// Return the raw event pointer for APIs such as `triggered_post`.
+    ///
+    /// # Safety
+    /// The pointer is only valid while this event is alive and, for borrowed
+    /// events, until UCC releases it after acknowledgement.
+    pub fn as_ptr(&self) -> *mut crate::bindings::ucc_ev_t {
         self.ptr
+    }
+}
+
+impl Drop for UccEvent {
+    fn drop(&mut self) {
+        // Borrowed events have no allocation here; owned waited-event storage
+        // is released by dropping the retained Box.
+        let _ = self.owned.take();
     }
 }
 

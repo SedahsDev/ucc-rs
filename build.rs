@@ -39,6 +39,7 @@ fn discover_ucc() -> (PathBuf, PathBuf) {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=src/bindings.rs");
     let (include_dir, lib_dir) = discover_ucc();
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
@@ -107,6 +108,4 @@ fn main() {
             }
         }
     }
-
-    println!("cargo:rerun-if-changed={}", src_path.display());
 }

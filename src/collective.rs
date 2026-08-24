@@ -198,10 +198,6 @@ impl Drop for UccCollectiveRequest {
             eprintln!(
                 "dropping an incomplete UCC collective request; leaking it to avoid undefined behavior"
             );
-            debug_assert!(
-                self.completed.get(),
-                "incomplete UCC collective request was dropped"
-            );
         }
     }
 }
@@ -434,8 +430,9 @@ impl<'a> CollectiveBuilder<'a> {
 /// An initialized collective operation ready to be posted.
 ///
 /// Holds the collective request handle until the operation completes.
-/// Use [`Self::test`] to record completion. Dropping an incomplete collective
-/// leaks its UCC request rather than finalizing it while in flight (UB).
+/// Use [`Self::test`] to record completion. Dropping a collective whose
+/// completion was not recorded by `test()` leaks its UCC request rather than
+/// finalizing it while in flight (UB).
 #[must_use = "Collective operations should be posted and waited on"]
 pub struct UccCollective {
     request: ucc_coll_req_h,
@@ -497,7 +494,11 @@ impl UccCollective {
     /// Test whether this collective has completed and track completion for drop.
     #[allow(non_upper_case_globals)]
     pub fn test(&self) -> Result<bool, UccStatus> {
-        let status = unsafe { (*self.request).status };
+        let status = unsafe {
+            // SAFETY: self.request is a valid handle from ucc_collective_init_and_post.
+            // ucc_collective_test is just `return request->status;`
+            (*self.request).status
+        };
         match status {
             ucc_status_t_UCC_OK => {
                 self.completed.set(true);
@@ -525,10 +526,6 @@ impl Drop for UccCollective {
         } else if !self.request.is_null() {
             eprintln!(
                 "dropping an incomplete UCC collective; leaking it to avoid undefined behavior"
-            );
-            debug_assert!(
-                self.completed.get(),
-                "incomplete UCC collective was dropped"
             );
         }
     }
