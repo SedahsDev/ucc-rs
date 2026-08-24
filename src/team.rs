@@ -137,6 +137,11 @@ impl UccTeam {
         self.inner.handle
     }
 
+    /// Progress the context that owns this team.
+    pub(crate) fn progress(&self) {
+        self.inner._ctx.progress();
+    }
+
     /// Query team attributes.
     ///
     /// Sets the requested attribute fields in the mask before calling the

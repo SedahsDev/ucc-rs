@@ -6,7 +6,7 @@
 
 use crate::bindings::{
     ucc_ee_ack_event, ucc_ee_create, ucc_ee_destroy, ucc_ee_get_event, ucc_ee_h, ucc_ee_params,
-    ucc_ee_set_event, ucc_ee_wait,
+    ucc_ee_set_event,
 };
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
@@ -71,7 +71,7 @@ impl UccExecutionEngine {
         self.inner.handle
     }
 
-    /// Set an owned or UCC-owned event.
+    /// Set a UCC-owned event.
     pub fn set_event(&self, event: &UccEvent) -> Result<(), UccStatus> {
         unsafe { self.set_event_raw(event.as_ptr()) }
     }
@@ -120,29 +120,24 @@ impl UccExecutionEngine {
 
     /// Block until an event is available on the execution engine.
     ///
-    /// This is a blocking call that waits for an event to be posted to
-    /// the execution engine. When an event arrives, the event pointer
-    /// is written to the provided location.
+    /// This is an unbounded blocking wrapper around [`Self::get_event`]. It
+    /// polls the event queue, progresses the owning context when the queue is
+    /// empty, and briefly yields between attempts. The returned event is a
+    /// pointer to UCC-owned storage; it must be acknowledged before the
+    /// execution engine is destroyed.
     ///
     /// # Safety
     ///
     /// The returned event pointer must eventually be acknowledged via `ack_event()`
     /// or used with `ucc_collective_triggered_post()`.
     pub unsafe fn wait_event(&self) -> Result<UccEvent, UccStatus> {
-        let mut event = Box::new(crate::bindings::ucc_ev_t {
-            ev_type: 0,
-            ev_context: std::ptr::null_mut(),
-            ev_context_size: 0,
-            req: std::ptr::null_mut(),
-        });
-        let status = ucc_ee_wait(self.handle(), &mut *event);
-        check_status(status)?;
-        // SAFETY: UCC fills this caller-provided allocation. The allocation is
-        // retained by UccEvent and released when that event is dropped.
-        Ok(UccEvent {
-            ptr: (&mut *event) as *mut crate::bindings::ucc_ev_t,
-            owned: Some(event),
-        })
+        loop {
+            if let Some(event) = self.get_event()? {
+                return Ok(event);
+            }
+            self._team.progress();
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
     }
 
     /// Get an event from the execution engine (non-blocking).
@@ -156,23 +151,20 @@ impl UccExecutionEngine {
     /// or used with `ucc_collective_triggered_post()`.
     pub unsafe fn get_event(&self) -> Result<Option<UccEvent>, UccStatus> {
         let mut event: *mut crate::bindings::ucc_ev_t = std::ptr::null_mut();
+        // SAFETY: the EE handle is valid for the lifetime of `self`, and UCC
+        // writes only the returned event pointer into this valid output slot.
+        // The pointed-to event remains owned by UCC until acknowledgement.
         let status = ucc_ee_get_event(self.handle(), &mut event);
         if status == 0 {
             // UCC_OK — event was available
-            return Ok((!event.is_null()).then_some(UccEvent {
-                ptr: event,
-                owned: None,
-            }));
+            return Ok((!event.is_null()).then_some(UccEvent { ptr: event }));
         }
         if status == 7 {
             // UCC_ERR_NO_RESOURCE — no event available right now
             return Ok(None);
         }
         check_status(status)?;
-        Ok((!event.is_null()).then_some(UccEvent {
-            ptr: event,
-            owned: None,
-        }))
+        Ok((!event.is_null()).then_some(UccEvent { ptr: event }))
     }
 }
 
@@ -188,14 +180,12 @@ impl Drop for UccExecutionEngine {
     }
 }
 
-/// Event storage returned by the execution engine.
+/// An event pointer returned by the execution engine.
 ///
-/// Waited events own their caller-provided copied storage and free it on drop.
-/// Events from `get_event` borrow storage owned by UCC; dropping them does not
-/// free that storage, which remains UCC-owned until the event is acknowledged.
+/// The storage is owned by UCC and remains valid until the event is
+/// acknowledged. Dropping this wrapper does not acknowledge or free it.
 pub struct UccEvent {
     ptr: *mut crate::bindings::ucc_ev_t,
-    owned: Option<Box<crate::bindings::ucc_ev_t>>,
 }
 
 impl UccEvent {
@@ -210,11 +200,7 @@ impl UccEvent {
 }
 
 impl Drop for UccEvent {
-    fn drop(&mut self) {
-        // Borrowed events have no allocation here; owned waited-event storage
-        // is released by dropping the retained Box.
-        let _ = self.owned.take();
-    }
+    fn drop(&mut self) {}
 }
 
 /// Parameters for UCC execution engine creation.
