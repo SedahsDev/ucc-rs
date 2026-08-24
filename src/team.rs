@@ -70,7 +70,8 @@ impl UccTeam {
     pub fn with_params(ctx: UccContext, team_params: UccTeamParams) -> Result<Self, UccStatus> {
         let mut team: ucc_team_h = std::ptr::null_mut();
         let ctx_handle = ctx.handle();
-        let params_ptr: *const ucc_team_params = &team_params.0;
+        let params_ptr: *const ucc_team_params = &team_params.params;
+        let deadline = std::time::Instant::now() + team_params.create_timeout;
 
         // Phase 1: Post team creation
         let status = unsafe {
@@ -87,7 +88,6 @@ impl UccTeam {
         }
 
         // Phase 2: Test/wait for team creation to complete
-        let mut iterations = 0;
         loop {
             let test_status = unsafe {
                 // Safety: team is a valid handle from ucc_team_create_post
@@ -96,15 +96,19 @@ impl UccTeam {
             if test_status == ucc_status_t_UCC_OK {
                 break;
             }
+            if test_status != crate::bindings::ucc_status_t_UCC_INPROGRESS {
+                return Err(UccStatus::from_raw(test_status));
+            }
             // Progress the context while waiting
             ctx.progress();
-            iterations += 1;
-            if iterations > 10000 {
-                unsafe {
-                    ucc_team_destroy(team);
-                }
+            if std::time::Instant::now() >= deadline {
+                // UCC documents ucc_team_destroy as invalid while
+                // ucc_team_create_post is in progress (ucc.h:1589-1595).
+                // Intentionally leak this incomplete handle rather than invoke
+                // undefined behavior; the process/library owns cleanup at exit.
                 return Err(UccStatus::Known(UccError::ErrTimedOut));
             }
+            std::thread::sleep(std::time::Duration::from_micros(100));
         }
 
         Ok(Self {
@@ -817,7 +821,10 @@ impl Drop for UccTeam {
 /// Parameters for UCC team creation.
 /// Configure team properties like ordering, sync type, and team size.
 #[must_use = "Team params should be used to create a team"]
-pub struct UccTeamParams(ucc_team_params);
+pub struct UccTeamParams {
+    params: ucc_team_params,
+    create_timeout: std::time::Duration,
+}
 
 impl Default for UccTeamParams {
     fn default() -> Self {
@@ -837,36 +844,48 @@ impl Default for UccTeamParams {
         params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_TEAM_SIZE as u64;
         params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_EP as u64;
         params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_EP_RANGE as u64;
-        Self(params)
+        Self {
+            params,
+            create_timeout: std::time::Duration::from_secs(30),
+        }
     }
 }
 
 impl UccTeamParams {
+    /// Set the maximum time to wait for asynchronous team creation.
+    ///
+    /// A zero duration causes the first incomplete poll to time out. The
+    /// default is 30 seconds.
+    pub fn with_create_timeout(&mut self, timeout: std::time::Duration) -> &mut Self {
+        self.create_timeout = timeout;
+        self
+    }
+
     /// Set the team size.
     pub fn with_team_size(&mut self, size: u64) -> &mut Self {
-        self.0.team_size = size;
-        self.0.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_TEAM_SIZE as u64;
+        self.params.team_size = size;
+        self.params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_TEAM_SIZE as u64;
         self
     }
 
     /// Set the collective posting ordering.
     pub fn with_ordering(&mut self, ordering: ucc_post_ordering_t) -> &mut Self {
-        self.0.ordering = ordering;
-        self.0.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_ORDERING as u64;
+        self.params.ordering = ordering;
+        self.params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_ORDERING as u64;
         self
     }
 
     /// Set the collective sync type.
     pub fn with_sync_type(&mut self, sync_type: ucc_coll_sync_type_t) -> &mut Self {
-        self.0.sync_type = sync_type;
-        self.0.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_SYNC_TYPE as u64;
+        self.params.sync_type = sync_type;
+        self.params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_SYNC_TYPE as u64;
         self
     }
 
     /// Set team flags.
     pub fn with_flags(&mut self, flags: u64) -> &mut Self {
-        self.0.flags = flags;
-        self.0.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_FLAGS as u64;
+        self.params.flags = flags;
+        self.params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_FLAGS as u64;
         self
     }
 
@@ -875,8 +894,8 @@ impl UccTeamParams {
     /// The OOB collective is a struct containing function pointers for
     /// out-of-band communication (allgather) used during team setup.
     pub fn with_oob(&mut self, oob: ucc_oob_coll_t) -> &mut Self {
-        self.0.oob = oob;
-        self.0.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_OOB as u64;
+        self.params.oob = oob;
+        self.params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_OOB as u64;
         self
     }
 
@@ -884,9 +903,9 @@ impl UccTeamParams {
     ///
     /// # Safety
     /// Directly modifying FFI fields bypasses mask management. Ensure any field
-    /// you set also has its corresponding bit set in `self.0.mask`.
+    /// you set also has its corresponding bit set in `self.params.mask`.
     pub fn inner_mut(&mut self) -> &mut ucc_team_params {
-        &mut self.0
+        &mut self.params
     }
 }
 
@@ -900,13 +919,21 @@ mod tests {
     fn test_ucc_team_params_default() {
         let params = UccTeamParams::default();
         assert_eq!(
-            params.0.ordering,
+            params.params.ordering,
             ucc_post_ordering_t_UCC_COLLECTIVE_POST_ORDERED
         );
         assert_eq!(
-            params.0.sync_type,
+            params.params.sync_type,
             ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES
         );
+    }
+
+    #[test]
+    fn test_ucc_team_create_timeout_configuration() {
+        let mut params = UccTeamParams::default();
+        assert_eq!(params.create_timeout, std::time::Duration::from_secs(30));
+        params.with_create_timeout(std::time::Duration::from_millis(25));
+        assert_eq!(params.create_timeout, std::time::Duration::from_millis(25));
     }
 
     #[test]
@@ -939,13 +966,16 @@ mod tests {
             let mut params = UccTeamParams::default();
             params.with_team_size(4);
             params.with_flags(0x10);
-            assert_eq!(params.0.team_size, 4);
-            assert_eq!(params.0.flags, 0x10);
+            assert_eq!(params.params.team_size, 4);
+            assert_eq!(params.params.flags, 0x10);
             // Verify mask includes the fields we set
             assert!(
-                params.0.mask & ucc_team_params_field_UCC_TEAM_PARAM_FIELD_TEAM_SIZE as u64 != 0
+                params.params.mask & ucc_team_params_field_UCC_TEAM_PARAM_FIELD_TEAM_SIZE as u64
+                    != 0
             );
-            assert!(params.0.mask & ucc_team_params_field_UCC_TEAM_PARAM_FIELD_FLAGS as u64 != 0);
+            assert!(
+                params.params.mask & ucc_team_params_field_UCC_TEAM_PARAM_FIELD_FLAGS as u64 != 0
+            );
         }
 
         /// Integration test: create a team using the correct ucc_team_create_post API.

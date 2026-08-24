@@ -23,7 +23,7 @@ cargo run --example lib_init_version
 
 Also: `UCC_INCLUDE_DIR` + `UCC_LIB_DIR`. Fallbacks: `/usr`, `/usr/local`, `/opt/ucc` (not home paths).
 
-See [`../BUILDING.md`](../BUILDING.md).
+See [`docs/BUILDING.md`](docs/BUILDING.md).
 
 ## Lifecycle
 
