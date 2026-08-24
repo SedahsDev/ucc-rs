@@ -7,6 +7,8 @@ fn discover_ucc() -> (PathBuf, PathBuf) {
     println!("cargo:rerun-if-env-changed=UCC_PREFIX");
     println!("cargo:rerun-if-env-changed=UCC_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=UCC_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=UCC_USE_PREGENERATED_BINDINGS");
+    println!("cargo:rerun-if-env-changed=UCC_UPDATE_COMMITTED_BINDINGS");
 
     if let Ok(prefix) = env::var("UCC_PREFIX") {
         let prefix = PathBuf::from(prefix);
@@ -37,6 +39,7 @@ fn discover_ucc() -> (PathBuf, PathBuf) {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=src/bindings.rs");
     let (include_dir, lib_dir) = discover_ucc();
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
@@ -46,6 +49,11 @@ fn main() {
 
     let src_path = PathBuf::from("src").join("bindings.rs");
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("bindings.rs");
+
+    if env::var("UCC_USE_PREGENERATED_BINDINGS").as_deref() == Ok("1") {
+        std::fs::copy(&src_path, &out_path).expect("Failed to copy pre-generated bindings");
+        return;
+    }
 
     let mut builder = bindgen::Builder::default()
         .header("wrapper.h")
@@ -80,7 +88,9 @@ fn main() {
             bindings
                 .write_to_file(&out_path)
                 .expect("Failed to write bindings to OUT_DIR");
-            let _ = std::fs::copy(&out_path, &src_path);
+            if env::var("UCC_UPDATE_COMMITTED_BINDINGS").as_deref() == Ok("1") {
+                let _ = std::fs::copy(&out_path, &src_path);
+            }
         }
         Err(e) => {
             println!(
@@ -98,6 +108,4 @@ fn main() {
             }
         }
     }
-
-    println!("cargo:rerun-if-changed={}", src_path.display());
 }

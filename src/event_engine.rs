@@ -6,7 +6,7 @@
 
 use crate::bindings::{
     ucc_ee_ack_event, ucc_ee_create, ucc_ee_destroy, ucc_ee_get_event, ucc_ee_h, ucc_ee_params,
-    ucc_ee_set_event, ucc_ee_wait,
+    ucc_ee_set_event,
 };
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
@@ -17,11 +17,23 @@ use crate::team::UccTeam;
 /// operations that are triggered by those events. Holds a reference to
 /// the [`UccTeam`] that created it. Cloneable — each clone shares
 /// the same underlying C handle.
-#[must_use = "Execution engine handles should be kept alive or explicitly dropped"]
-#[derive(Clone)]
-pub struct UccExecutionEngine {
+struct UccExecutionEngineInner {
     handle: ucc_ee_h,
+}
+
+#[must_use = "Execution engine handles should be kept alive or explicitly dropped"]
+pub struct UccExecutionEngine {
+    inner: std::rc::Rc<UccExecutionEngineInner>,
     _team: UccTeam,
+}
+
+impl Clone for UccExecutionEngine {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            _team: self._team.clone(),
+        }
+    }
 }
 
 impl UccExecutionEngine {
@@ -49,14 +61,19 @@ impl UccExecutionEngine {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
         Ok(Self {
-            handle: ee,
+            inner: std::rc::Rc::new(UccExecutionEngineInner { handle: ee }),
             _team: team,
         })
     }
 
     /// Get a raw handle for use with lower-level APIs.
     pub fn handle(&self) -> ucc_ee_h {
-        self.handle
+        self.inner.handle
+    }
+
+    /// Set a UCC-owned event.
+    pub fn set_event(&self, event: &UccEvent) -> Result<(), UccStatus> {
+        unsafe { self.set_event_raw(event.as_ptr()) }
     }
 
     /// Set an event on the execution engine.
@@ -68,8 +85,11 @@ impl UccExecutionEngine {
     ///
     /// The event pointer must be valid and was obtained from the execution engine
     /// or created by the user. The event is consumed by this call.
-    pub unsafe fn set_event(&self, event: *mut crate::bindings::ucc_ev_t) -> Result<(), UccStatus> {
-        let status = ucc_ee_set_event(self.handle, event);
+    pub unsafe fn set_event_raw(
+        &self,
+        event: *mut crate::bindings::ucc_ev_t,
+    ) -> Result<(), UccStatus> {
+        let status = ucc_ee_set_event(self.handle(), event);
         check_status(status)
     }
 
@@ -82,34 +102,42 @@ impl UccExecutionEngine {
     ///
     /// The event pointer must be valid and was obtained from the execution engine
     /// (e.g., via a callback or `wait_event()`).
-    pub unsafe fn ack_event(&self, event: *mut crate::bindings::ucc_ev_t) -> Result<(), UccStatus> {
-        let status = ucc_ee_ack_event(self.handle, event);
+    pub fn ack_event(&self, event: &UccEvent) -> Result<(), UccStatus> {
+        unsafe { self.ack_event_raw(event.as_ptr()) }
+    }
+
+    /// Acknowledge a raw event pointer. The caller must ensure it came from this EE.
+    ///
+    /// # Safety
+    /// `event` must be a valid event pointer owned by this execution engine.
+    pub unsafe fn ack_event_raw(
+        &self,
+        event: *mut crate::bindings::ucc_ev_t,
+    ) -> Result<(), UccStatus> {
+        let status = ucc_ee_ack_event(self.handle(), event);
         check_status(status)
     }
 
     /// Block until an event is available on the execution engine.
     ///
-    /// This is a blocking call that waits for an event to be posted to
-    /// the execution engine. When an event arrives, the event pointer
-    /// is written to the provided location.
+    /// This is an unbounded blocking wrapper around [`Self::get_event`]. It
+    /// polls the event queue, progresses the owning context when the queue is
+    /// empty, and briefly yields between attempts. The returned event is a
+    /// pointer to UCC-owned storage; it must be acknowledged before the
+    /// execution engine is destroyed.
     ///
     /// # Safety
     ///
     /// The returned event pointer must eventually be acknowledged via `ack_event()`
     /// or used with `ucc_collective_triggered_post()`.
-    pub unsafe fn wait_event(&self) -> Result<*mut crate::bindings::ucc_ev_t, UccStatus> {
-        // The C API writes event data into a ucc_ev_t struct, then returns a pointer to it.
-        // We allocate a struct on the stack and pass a mutable pointer to it.
-        let mut event: crate::bindings::ucc_ev_t = crate::bindings::ucc_ev_t {
-            ev_type: 0,
-            ev_context: std::ptr::null_mut(),
-            ev_context_size: 0,
-            req: std::ptr::null_mut(),
-        };
-        let status = ucc_ee_wait(self.handle, &mut event as *mut crate::bindings::ucc_ev_t);
-        check_status(status)?;
-        // Return a pointer to the event data — note the caller must keep this struct alive
-        Ok(&mut event as *mut crate::bindings::ucc_ev_t)
+    pub unsafe fn wait_event(&self) -> Result<UccEvent, UccStatus> {
+        loop {
+            if let Some(event) = self.get_event()? {
+                return Ok(event);
+            }
+            self._team.progress();
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
     }
 
     /// Get an event from the execution engine (non-blocking).
@@ -121,32 +149,58 @@ impl UccExecutionEngine {
     ///
     /// The returned event pointer must eventually be acknowledged via `ack_event()`
     /// or used with `ucc_collective_triggered_post()`.
-    pub unsafe fn get_event(&self) -> Result<Option<*mut crate::bindings::ucc_ev_t>, UccStatus> {
+    pub unsafe fn get_event(&self) -> Result<Option<UccEvent>, UccStatus> {
         let mut event: *mut crate::bindings::ucc_ev_t = std::ptr::null_mut();
-        let status = ucc_ee_get_event(self.handle, &mut event);
+        // SAFETY: the EE handle is valid for the lifetime of `self`, and UCC
+        // writes only the returned event pointer into this valid output slot.
+        // The pointed-to event remains owned by UCC until acknowledgement.
+        let status = ucc_ee_get_event(self.handle(), &mut event);
         if status == 0 {
             // UCC_OK — event was available
-            return Ok(Some(event));
+            return Ok((!event.is_null()).then_some(UccEvent { ptr: event }));
         }
         if status == 7 {
             // UCC_ERR_NO_RESOURCE — no event available right now
             return Ok(None);
         }
         check_status(status)?;
-        Ok(Some(event))
+        Ok((!event.is_null()).then_some(UccEvent { ptr: event }))
     }
 }
 
 impl Drop for UccExecutionEngine {
     fn drop(&mut self) {
-        if !self.handle.is_null() {
-            // Safety: handle was validated non-null above and the C function only
-            // dereferences the handle pointer for cleanup. Handle is nulled after
-            // to prevent double-free.
-            let _ = unsafe { ucc_ee_destroy(self.handle) };
-            self.handle = std::ptr::null_mut();
+        let handle = std::rc::Rc::get_mut(&mut self.inner)
+            .map(|inner| std::mem::replace(&mut inner.handle, std::ptr::null_mut()))
+            .filter(|h| !h.is_null());
+        if let Some(handle) = handle {
+            // SAFETY: handle is the valid, uniquely owned execution-engine handle.
+            let _ = unsafe { ucc_ee_destroy(handle) };
         }
     }
+}
+
+/// An event pointer returned by the execution engine.
+///
+/// The storage is owned by UCC and remains valid until the event is
+/// acknowledged. Dropping this wrapper does not acknowledge or free it.
+pub struct UccEvent {
+    ptr: *mut crate::bindings::ucc_ev_t,
+}
+
+impl UccEvent {
+    /// Return the raw event pointer for APIs such as `triggered_post`.
+    ///
+    /// # Safety
+    /// The pointer is only valid while this event is alive and, for borrowed
+    /// events, until UCC releases it after acknowledgement.
+    pub fn as_ptr(&self) -> *mut crate::bindings::ucc_ev_t {
+        self.ptr
+    }
+}
+
+impl Drop for UccEvent {
+    fn drop(&mut self) {}
 }
 
 /// Parameters for UCC execution engine creation.
