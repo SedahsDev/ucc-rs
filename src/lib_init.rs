@@ -13,7 +13,7 @@ use crate::bindings::{
     ucc_lib_params_field_UCC_LIB_PARAM_FIELD_SYNC_TYPE,
     ucc_lib_params_field_UCC_LIB_PARAM_FIELD_THREAD_MODE,
     ucc_status_string as ucc_status_string_raw, ucc_thread_mode_t,
-    ucc_thread_mode_t_UCC_THREAD_SINGLE,
+    ucc_thread_mode_t_UCC_THREAD_SINGLE, UCC_API_MAJOR, UCC_API_MINOR,
 };
 use crate::status::{check_status, UccStatus};
 
@@ -144,7 +144,15 @@ impl UccLib {
             // Safety: lib_params and config are valid references; &mut lib is a
             // valid output pointer. ucc_init_version only writes to this pointer
             // on success.
-            ucc_init_version(1, 9, &lib_params.0, config.handle(), &mut lib)
+            // These constants are emitted from the committed bindings generated
+            // against the UCC API version supported by this crate.
+            ucc_init_version(
+                UCC_API_MAJOR,
+                UCC_API_MINOR,
+                &lib_params.0,
+                config.handle(),
+                &mut lib,
+            )
         };
         check_status(status)?;
         // config is dropped here, releasing the config handle

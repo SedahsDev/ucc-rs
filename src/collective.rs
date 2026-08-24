@@ -80,47 +80,48 @@ pub type ReductionOp = UccReductionOp;
 /// UCC datatype enum for safe API usage.
 ///
 /// Maps directly to the `UCC_DT_*` predefined datatypes from the UCC C API.
-/// These are simple integer values (0–17) used in collective operations
-/// to specify element types.
+/// The committed bindings do not expose the `UCC_DT_*` preprocessor macros.
+/// The discriminants therefore mirror the values in `ucc/api/ucc.h` from the
+/// API version against which those bindings were generated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 #[allow(non_upper_case_globals)]
 pub enum DataType {
-    /// 8-bit signed integer (int8_t)
+    /// 8-bit signed integer (int8_t), `UCC_DT_INT8` (0).
     Int8 = 0,
-    /// 16-bit signed integer (int16_t)
+    /// 16-bit signed integer (int16_t), `UCC_DT_INT16` (1).
     Int16 = 1,
-    /// 32-bit signed integer (int32_t)
+    /// 32-bit signed integer (int32_t), `UCC_DT_INT32` (2).
     Int32 = 2,
-    /// 64-bit signed integer (int64_t)
+    /// 64-bit signed integer (int64_t), `UCC_DT_INT64` (3).
     Int64 = 3,
-    /// 128-bit signed integer
+    /// 128-bit signed integer, `UCC_DT_INT128` (4).
     Int128 = 4,
-    /// 8-bit unsigned integer (uint8_t / unsigned char)
+    /// 8-bit unsigned integer (uint8_t / unsigned char), `UCC_DT_UINT8` (5).
     Uint8 = 5,
-    /// 16-bit unsigned integer (uint16_t)
+    /// 16-bit unsigned integer (uint16_t), `UCC_DT_UINT16` (6).
     Uint16 = 6,
-    /// 32-bit unsigned integer (uint32_t)
+    /// 32-bit unsigned integer (uint32_t), `UCC_DT_UINT32` (7).
     Uint32 = 7,
-    /// 64-bit unsigned integer (uint64_t)
+    /// 64-bit unsigned integer (uint64_t), `UCC_DT_UINT64` (8).
     Uint64 = 8,
-    /// 128-bit unsigned integer
+    /// 128-bit unsigned integer, `UCC_DT_UINT128` (9).
     Uint128 = 9,
-    /// 16-bit float (half precision)
+    /// 16-bit float (half precision), `UCC_DT_FLOAT16` (10).
     Float16 = 10,
-    /// 32-bit float (single precision)
+    /// 32-bit float (single precision), `UCC_DT_FLOAT32` (11).
     Float32 = 11,
-    /// 64-bit float (double precision)
+    /// 64-bit float (double precision), `UCC_DT_FLOAT64` (12).
     Float64 = 12,
-    /// 16-bit brain float (bfloat16)
+    /// 16-bit brain float (bfloat16), `UCC_DT_BFLOAT16` (13).
     BFloat16 = 13,
-    /// 128-bit float (quad precision)
+    /// 128-bit float (quad precision), `UCC_DT_FLOAT128` (14).
     Float128 = 14,
-    /// 32-bit complex float (two single-precision floats)
+    /// 32-bit complex float (two single-precision floats), `UCC_DT_FLOAT32_COMPLEX` (15).
     Float32Complex = 15,
-    /// 64-bit complex float (two double-precision floats)
+    /// 64-bit complex float (two double-precision floats), `UCC_DT_FLOAT64_COMPLEX` (16).
     Float64Complex = 16,
-    /// 128-bit complex float (two quad-precision floats)
+    /// 128-bit complex float (two quad-precision floats), `UCC_DT_FLOAT128_COMPLEX` (17).
     Float128Complex = 17,
 }
 
@@ -225,7 +226,7 @@ impl Drop for UccCollectiveRequest {
 /// let coll = CollectiveBuilder::new(UccCollectiveType::Allreduce)
 ///     .with_inplace(&mut buf)
 ///     .with_count(256)
-///     .with_dtype(DataType::Uchar.as_raw() as u32)
+///     .with_dtype(DataType::Uchar)
 ///     .with_reduction_op(UccReductionOp::Sum)
 ///     .init(&team)
 ///     .unwrap();
@@ -313,8 +314,13 @@ impl<'a> CollectiveBuilder<'a> {
         self
     }
 
-    /// Set the data type (as raw u32 / UCC datatype ordinal).
-    pub fn with_dtype(mut self, dt: u32) -> Self {
+    /// Set the data type using the type-safe predefined datatype enum.
+    pub fn with_dtype(self, datatype: DataType) -> Self {
+        self.with_dtype_raw(datatype.as_raw() as u32)
+    }
+
+    /// Set the data type from a raw UCC datatype ordinal (advanced use).
+    pub fn with_dtype_raw(mut self, dt: u32) -> Self {
         self.datatype = Some(dt);
         self
     }
@@ -553,6 +559,45 @@ mod tests {
     fn test_reduction_op_as_raw() {
         assert_eq!(UccReductionOp::Sum.as_raw(), ucc_reduction_op_t_UCC_OP_SUM);
         assert_eq!(UccReductionOp::Max.as_raw(), ucc_reduction_op_t_UCC_OP_MAX);
+    }
+
+    #[test]
+    fn datatype_ordinals_and_sizes_match_ucc_header() {
+        let expected = [
+            (DataType::Int8, 0, 1),
+            (DataType::Int16, 1, 2),
+            (DataType::Int32, 2, 4),
+            (DataType::Int64, 3, 8),
+            (DataType::Int128, 4, 16),
+            (DataType::Uint8, 5, 1),
+            (DataType::Uint16, 6, 2),
+            (DataType::Uint32, 7, 4),
+            (DataType::Uint64, 8, 8),
+            (DataType::Uint128, 9, 16),
+            (DataType::Float16, 10, 2),
+            (DataType::Float32, 11, 4),
+            (DataType::Float64, 12, 8),
+            (DataType::BFloat16, 13, 2),
+            (DataType::Float128, 14, 16),
+            (DataType::Float32Complex, 15, 8),
+            (DataType::Float64Complex, 16, 16),
+            (DataType::Float128Complex, 17, 32),
+        ];
+        for (datatype, ordinal, size) in expected {
+            assert_eq!(datatype.as_raw(), ordinal);
+            assert_eq!(datatype.size_in_bytes(), size);
+        }
+    }
+
+    #[test]
+    fn typed_and_raw_dtype_builder_methods_set_same_value() {
+        let typed = CollectiveBuilder::new(UccCollectiveType::Allreduce)
+            .with_dtype(DataType::Float64)
+            .datatype;
+        let raw = CollectiveBuilder::new(UccCollectiveType::Allreduce)
+            .with_dtype_raw(12)
+            .datatype;
+        assert_eq!(typed, raw);
     }
 
     #[test]
