@@ -157,12 +157,13 @@ impl DataType {
 ///
 /// Dropping an incomplete request intentionally leaks its UCC request rather
 /// than finalizing it while it is in flight, which would be undefined behavior.
-pub struct UccCollectiveRequest {
+pub struct UccCollectiveRequest<'a> {
     pub(crate) request: ucc_coll_req_h,
     pub(crate) completed: std::cell::Cell<bool>,
+    _phantom: std::marker::PhantomData<&'a mut [u8]>,
 }
 
-impl UccCollectiveRequest {
+impl<'a> UccCollectiveRequest<'a> {
     /// Test whether the collective operation has completed.
     ///
     /// Returns `Ok(true)` if the operation is complete, `Ok(false)` if
@@ -188,9 +189,17 @@ impl UccCollectiveRequest {
                 .unwrap_or(UccStatus::Known(UccError::ErrNoResource))),
         }
     }
+
+    pub(crate) fn new(request: ucc_coll_req_h) -> Self {
+        Self {
+            request,
+            completed: std::cell::Cell::new(false),
+            _phantom: std::marker::PhantomData,
+        }
+    }
 }
 
-impl Drop for UccCollectiveRequest {
+impl<'a> Drop for UccCollectiveRequest<'a> {
     fn drop(&mut self) {
         if !self.request.is_null() && self.completed.get() {
             // Safety: request is a completed, valid handle.
@@ -244,7 +253,7 @@ pub struct CollectiveBuilder<'a> {
     root: Option<u64>,
     tag: Option<u16>,
     flags: u64,
-    _bufs: std::marker::PhantomData<&'a mut ()>,
+    _bufs: std::marker::PhantomData<&'a mut [u8]>,
 }
 
 impl<'a> CollectiveBuilder<'a> {
@@ -359,9 +368,9 @@ impl<'a> CollectiveBuilder<'a> {
 
     /// Initialize the collective operation (without posting).
     ///
-    /// Returns a [`UccCollective`] that can be posted later via `post()`.
+    /// Returns a [`UccCollective<'a>`] that can be posted later via `post()`.
     #[must_use = "Result should be checked"]
-    pub fn init(self, team: &UccTeam) -> Result<UccCollective, UccStatus> {
+    pub fn init(self, team: &UccTeam) -> Result<UccCollective<'a>, UccStatus> {
         let mut args = self.build_args()?;
         let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
         let status = unsafe {
@@ -377,6 +386,7 @@ impl<'a> CollectiveBuilder<'a> {
             coll_type: self.coll_type,
             completed: std::cell::Cell::new(false),
             _team: team.clone(),
+            _phantom: std::marker::PhantomData,
         })
     }
 
@@ -385,7 +395,7 @@ impl<'a> CollectiveBuilder<'a> {
     /// Convenience method that calls `ucc_collective_init_and_post` —
     /// combines initialization and posting into one FFI call.
     #[must_use = "Result should be checked"]
-    pub fn init_and_post(self, team: &UccTeam) -> Result<UccCollective, UccStatus> {
+    pub fn init_and_post(self, team: &UccTeam) -> Result<UccCollective<'a>, UccStatus> {
         let mut args = self.build_args()?;
         let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
         let status = unsafe {
@@ -401,6 +411,7 @@ impl<'a> CollectiveBuilder<'a> {
             coll_type: self.coll_type,
             completed: std::cell::Cell::new(false),
             _team: team.clone(),
+            _phantom: std::marker::PhantomData,
         })
     }
 
@@ -450,14 +461,15 @@ impl<'a> CollectiveBuilder<'a> {
 /// completion was not recorded by `test()` leaks its UCC request rather than
 /// finalizing it while in flight (UB).
 #[must_use = "Collective operations should be posted and waited on"]
-pub struct UccCollective {
+pub struct UccCollective<'a> {
     request: ucc_coll_req_h,
     coll_type: UccCollectiveType,
     completed: std::cell::Cell<bool>,
     _team: UccTeam,
+    _phantom: std::marker::PhantomData<&'a mut [u8]>,
 }
 
-impl UccCollective {
+impl<'a> UccCollective<'a> {
     /// Post the collective operation for asynchronous execution.
     ///
     /// Returns immediately — the collective runs asynchronously.
@@ -533,7 +545,7 @@ impl UccCollective {
     }
 }
 
-impl Drop for UccCollective {
+impl<'a> Drop for UccCollective<'a> {
     fn drop(&mut self) {
         if !self.request.is_null() && self.completed.get() {
             // Safety: request is a completed, valid handle.
