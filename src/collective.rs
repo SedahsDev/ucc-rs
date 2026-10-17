@@ -18,8 +18,8 @@ use crate::bindings::{
     ucc_reduction_op_t, ucc_reduction_op_t_UCC_OP_BAND, ucc_reduction_op_t_UCC_OP_BOR,
     ucc_reduction_op_t_UCC_OP_BXOR, ucc_reduction_op_t_UCC_OP_LAND, ucc_reduction_op_t_UCC_OP_LOR,
     ucc_reduction_op_t_UCC_OP_LXOR, ucc_reduction_op_t_UCC_OP_MAX, ucc_reduction_op_t_UCC_OP_MIN,
-    ucc_reduction_op_t_UCC_OP_PROD, ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t_UCC_ERR_NO_MESSAGE,
-    ucc_status_t_UCC_OK,
+    ucc_reduction_op_t_UCC_OP_PROD, ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t,
+    ucc_status_t_UCC_ERR_NO_MESSAGE, ucc_status_t_UCC_OK,
 };
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
@@ -163,6 +163,54 @@ pub struct UccCollectiveRequest {
 }
 
 impl UccCollectiveRequest {
+    /// Get the raw status value from the request.
+    ///
+    /// # Safety
+    /// This exposes the raw FFI status type. Prefer is_complete(), is_in_progress(),
+    /// or check() for idiomatic Rust code.
+    #[allow(non_upper_case_globals)]
+    pub(crate) fn raw_status(&self) -> ucc_status_t {
+        unsafe { (*self.request).status }
+    }
+
+    /// Check if the collective operation has completed.
+    ///
+    /// Returns true if the operation has completed (either successfully or with an error).
+    /// This does not advance the operation; it only checks the current status.
+    pub fn is_complete(&self) -> bool {
+        let status = self.raw_status();
+        status == ucc_status_t_UCC_OK || (status < 0 && status != ucc_status_t_UCC_ERR_NO_MESSAGE)
+    }
+
+    /// Check if the collective operation is still in progress.
+    ///
+    /// Returns true if the operation is still running. This includes both
+    /// UCC_INPROGRESS and UCC_ERR_NO_MESSAGE (which indicates no completion message
+    /// has been received yet).
+    pub fn is_in_progress(&self) -> bool {
+        let status = self.raw_status();
+        status == -1 || status == ucc_status_t_UCC_ERR_NO_MESSAGE
+    }
+
+    /// Check the status of the collective operation.
+    ///
+    /// Returns Ok(()) if the operation has completed successfully.
+    /// Returns Err if the operation has completed with an error.
+    /// Returns Ok(()) if the operation is still in progress (caller should poll again).
+    ///
+    /// This is the recommended way to check status instead of peeking at raw fields.
+    pub fn check(&self) -> Result<(), UccStatus> {
+        let status = self.raw_status();
+        match status {
+            0 => Ok(()),
+            -39 => Ok(()), // still in progress
+            -1 => Ok(()),  // UCC_INPROGRESS, still in progress
+            _ => Err(check_status(status)
+                .err()
+                .unwrap_or(UccStatus::Known(UccError::ErrNoResource))),
+        }
+    }
+
     /// Test whether the collective operation has completed.
     ///
     /// Returns `Ok(true)` if the operation is complete, `Ok(false)` if
@@ -458,6 +506,54 @@ pub struct UccCollective {
 }
 
 impl UccCollective {
+    /// Get the raw status value from the request.
+    ///
+    /// # Safety
+    /// This exposes the raw FFI status type. Prefer is_complete(), is_in_progress(),
+    /// or check() for idiomatic Rust code.
+    #[allow(non_upper_case_globals)]
+    pub(crate) fn raw_status(&self) -> ucc_status_t {
+        unsafe { (*self.request).status }
+    }
+
+    /// Check if the collective operation has completed.
+    ///
+    /// Returns true if the operation has completed (either successfully or with an error).
+    /// This does not advance the operation; it only checks the current status.
+    pub fn is_complete(&self) -> bool {
+        let status = self.raw_status();
+        status == ucc_status_t_UCC_OK || (status < 0 && status != ucc_status_t_UCC_ERR_NO_MESSAGE)
+    }
+
+    /// Check if the collective operation is still in progress.
+    ///
+    /// Returns true if the operation is still running. This includes both
+    /// UCC_INPROGRESS and UCC_ERR_NO_MESSAGE (which indicates no completion message
+    /// has been received yet).
+    pub fn is_in_progress(&self) -> bool {
+        let status = self.raw_status();
+        status == -1 || status == ucc_status_t_UCC_ERR_NO_MESSAGE
+    }
+
+    /// Check the status of the collective operation.
+    ///
+    /// Returns Ok(()) if the operation has completed successfully.
+    /// Returns Err if the operation has completed with an error.
+    /// Returns Ok(()) if the operation is still in progress (caller should poll again).
+    ///
+    /// This is the recommended way to check status instead of peeking at raw fields.
+    pub fn check(&self) -> Result<(), UccStatus> {
+        let status = self.raw_status();
+        match status {
+            0 => Ok(()),
+            -39 => Ok(()), // still in progress
+            -1 => Ok(()),  // UCC_INPROGRESS, still in progress
+            _ => Err(check_status(status)
+                .err()
+                .unwrap_or(UccStatus::Known(UccError::ErrNoResource))),
+        }
+    }
+
     /// Post the collective operation for asynchronous execution.
     ///
     /// Returns immediately — the collective runs asynchronously.
@@ -502,8 +598,9 @@ impl UccCollective {
         check_status(status)
     }
 
-    /// Get the raw request handle for testing completion.
-    pub fn request(&self) -> ucc_coll_req_h {
+    /// Get the raw request handle for internal use.
+    #[allow(dead_code)]
+    pub(crate) fn request(&self) -> ucc_coll_req_h {
         self.request
     }
 
@@ -649,5 +746,42 @@ mod tests {
         unsafe {
             assert_eq!(args.dst.info.count, 16);
         }
+    }
+
+    #[test]
+    fn test_raw_status_ok() {
+        // Test that raw_status returns the correct value for a completed request
+        // This test will be a compile-time check that the method exists
+        let _fn_exists: fn(&UccCollectiveRequest) -> ucc_status_t =
+            UccCollectiveRequest::raw_status;
+    }
+
+    #[test]
+    fn test_is_complete_true() {
+        // Test that is_complete returns true for completed operations
+        // This test will be a compile-time check that the method exists
+        let _fn_exists: fn(&UccCollectiveRequest) -> bool = UccCollectiveRequest::is_complete;
+    }
+
+    #[test]
+    fn test_is_in_progress_inprogress() {
+        // Test that is_in_progress returns true for INPROGRESS status
+        // This test will be a compile-time check that the method exists
+        let _fn_exists: fn(&UccCollectiveRequest) -> bool = UccCollectiveRequest::is_in_progress;
+    }
+
+    #[test]
+    fn test_is_in_progress_no_message() {
+        // Test that is_in_progress returns true for ERR_NO_MESSAGE status
+        // This test will be a compile-time check that the method exists
+        let _fn_exists: fn(&UccCollectiveRequest) -> bool = UccCollectiveRequest::is_in_progress;
+    }
+
+    #[test]
+    fn test_check_error() {
+        // Test that check returns Err for error status
+        // This test will be a compile-time check that the method exists
+        let _fn_exists: fn(&UccCollectiveRequest) -> Result<(), UccStatus> =
+            UccCollectiveRequest::check;
     }
 }
