@@ -68,6 +68,48 @@ fn main() {
 - Keep collective buffers alive until requests complete.
 - `CollectiveBuilder` ties buffer slices to a lifetime and takes raw host pointers for UCC.
 
+## Polling for collective completion
+
+Safe helper methods prevent direct access to raw FFI status fields.
+
+```rust
+use ucc::collective::{CollectiveBuilder, UccCollectiveType};
+use ucc::datatype::DataType;
+use ucc::lib_init::UccLib;
+use ucc::reduction::UccReductionOp;
+use ucc::team::UccTeam;
+
+fn example(team: &UccTeam) -> Result<(), Box<dyn std::error::Error>> {
+    let mut buf = [0u8; 256];
+    let coll = CollectiveBuilder::new(UccCollectiveType::Allreduce)
+        .with_inplace(&mut buf)
+        .with_count(256)
+        .with_dtype(DataType::Uchar)
+        .with_reduction_op(UccReductionOp::Sum)
+        .init_and_post(team)?;
+
+    // Poll for completion using safe helpers
+    loop {
+        if coll.is_complete() {
+            break;
+        }
+        if coll.is_in_progress() {
+            // Still running, continue polling
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            continue;
+        }
+        // Check for errors
+        if let Err(e) = coll.check() {
+            return Err(e.into());
+        }
+    }
+
+    Ok(())
+}
+```
+
+Note: The `request()` handle is `pub(crate)` to avoid exposing bindgen types in the public API. Use `is_complete()`, `is_in_progress()`, and `check()` instead of reading `request().status` directly.
+
 ## License
 
 BSD-style (see `LICENSE`). See [`REVIEW.md`](./REVIEW.md) for full review.
