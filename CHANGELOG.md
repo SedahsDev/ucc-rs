@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix CollectiveBuilder allgather truncation: add with_dst_count() to express asymmetric src/dst counts
+
 ## 0.1.0
 
 - Portable `build.rs` (`UCC_PREFIX` / include+lib env)

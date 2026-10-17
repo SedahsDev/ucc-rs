@@ -238,6 +238,7 @@ pub struct CollectiveBuilder<'a> {
     /// Host buffer pointer for `dst.info.buffer` (live until coll completes).
     dst: Option<*mut std::os::raw::c_void>,
     count: Option<u64>,
+    dst_count: Option<u64>,
     datatype: Option<u32>,
     reduction_op: Option<UccReductionOp>,
     root: Option<u64>,
@@ -254,6 +255,7 @@ impl<'a> CollectiveBuilder<'a> {
             src: None,
             dst: None,
             count: None,
+            dst_count: None,
             datatype: None,
             reduction_op: None,
             root: None,
@@ -311,6 +313,12 @@ impl<'a> CollectiveBuilder<'a> {
     /// Set the element count.
     pub fn with_count(mut self, count: u64) -> Self {
         self.count = Some(count);
+        self
+    }
+
+    /// Set the destination element count (for operations where src and dst counts differ).
+    pub fn with_dst_count(mut self, count: u64) -> Self {
+        self.dst_count = Some(count);
         self
     }
 
@@ -414,7 +422,7 @@ impl<'a> CollectiveBuilder<'a> {
         args.dst.info.buffer = dst;
         args.src.info.count = count;
         args.src.info.datatype = datatype as ucc_datatype_t;
-        args.dst.info.count = count;
+        args.dst.info.count = self.dst_count.unwrap_or(count);
         args.dst.info.datatype = datatype as ucc_datatype_t;
         args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
         args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
@@ -621,5 +629,25 @@ mod tests {
             .with_reduction_op(UccReductionOp::Sum)
             .with_root(0);
         // Builder created successfully — actual init requires live UCC resources
+    }
+
+    #[test]
+    fn test_collective_builder_dst_count() {
+        let src_buf = [1u8; 4];
+        let mut dst_buf = [0u8; 16];
+        let args = CollectiveBuilder::new(UccCollectiveType::Allgather)
+            .with_count(4)
+            .with_dst_count(16)
+            .with_dtype(DataType::Uchar)
+            .with_src(&src_buf)
+            .with_dst(&mut dst_buf)
+            .build_args()
+            .unwrap();
+        unsafe {
+            assert_eq!(args.src.info.count, 4);
+        }
+        unsafe {
+            assert_eq!(args.dst.info.count, 16);
+        }
     }
 }
