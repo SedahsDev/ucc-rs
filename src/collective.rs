@@ -18,8 +18,8 @@ use crate::bindings::{
     ucc_reduction_op_t, ucc_reduction_op_t_UCC_OP_BAND, ucc_reduction_op_t_UCC_OP_BOR,
     ucc_reduction_op_t_UCC_OP_BXOR, ucc_reduction_op_t_UCC_OP_LAND, ucc_reduction_op_t_UCC_OP_LOR,
     ucc_reduction_op_t_UCC_OP_LXOR, ucc_reduction_op_t_UCC_OP_MAX, ucc_reduction_op_t_UCC_OP_MIN,
-    ucc_reduction_op_t_UCC_OP_PROD, ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t_UCC_ERR_NO_MESSAGE,
-    ucc_status_t_UCC_OK,
+    ucc_reduction_op_t_UCC_OP_PROD, ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t_UCC_INPROGRESS,
+    ucc_status_t_UCC_OK, ucc_status_t_UCC_OPERATION_INITIALIZED,
 };
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
@@ -182,10 +182,9 @@ impl UccCollectiveRequest {
                 self.completed.set(true);
                 Ok(true)
             }
-            ucc_status_t_UCC_ERR_NO_MESSAGE => Ok(false), // still in progress
-            _ => Err(check_status(status)
-                .err()
-                .unwrap_or(UccStatus::Known(UccError::ErrNoResource))),
+            ucc_status_t_UCC_INPROGRESS | ucc_status_t_UCC_OPERATION_INITIALIZED => Ok(false),
+            s if s < 0 => Err(UccStatus::from_raw(s)),
+            s => Err(UccStatus::Unknown(s)),
         }
     }
 }
@@ -512,10 +511,9 @@ impl UccCollective {
                 self.completed.set(true);
                 Ok(true)
             }
-            ucc_status_t_UCC_ERR_NO_MESSAGE => Ok(false),
-            _ => Err(check_status(status)
-                .err()
-                .unwrap_or(UccStatus::Known(UccError::ErrNoResource))),
+            ucc_status_t_UCC_INPROGRESS | ucc_status_t_UCC_OPERATION_INITIALIZED => Ok(false),
+            s if s < 0 => Err(UccStatus::from_raw(s)),
+            s => Err(UccStatus::Unknown(s)),
         }
     }
 

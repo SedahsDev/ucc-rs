@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- fix: correct status classification in collective test methods (UCC_INPROGRESS treated as in-progress, UCC_ERR_NO_MESSAGE treated as error)
+
 ## 0.1.0
 
 - Portable `build.rs` (`UCC_PREFIX` / include+lib env)
