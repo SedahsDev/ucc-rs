@@ -23,6 +23,7 @@ use crate::bindings::{
 };
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
+use std::mem;
 
 /// Collective type enum for safe API usage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -236,14 +237,33 @@ impl UccCollectiveRequest {
                 .unwrap_or(UccStatus::Known(UccError::ErrNoResource))),
         }
     }
+
+    /// Explicitly finalize the collective operation.
+    /// After calling this, the request is invalid and cannot be used.
+    /// Returns Ok(()) if finalized successfully, or if already finalized.
+    pub fn finalize(&mut self) -> Result<(), UccStatus> {
+        let request = mem::replace(&mut self.request, std::ptr::null_mut());
+        if request.is_null() {
+            return Ok(()); // Already finalized
+        }
+        let status = unsafe {
+            // Safety: request is a valid collective request handle.
+            ucc_collective_finalize(request)
+        };
+        check_status(status)
+    }
+
+    /// Check if the request is still valid (has not been finalized).
+    pub fn is_valid(&self) -> bool {
+        !self.request.is_null()
+    }
 }
 
 impl Drop for UccCollectiveRequest {
     fn drop(&mut self) {
         if !self.request.is_null() && self.completed.get() {
-            // Safety: request is a completed, valid handle.
-            let _ = unsafe { ucc_collective_finalize(self.request) };
-            self.request = std::ptr::null_mut();
+            let request = mem::replace(&mut self.request, std::ptr::null_mut());
+            let _ = unsafe { ucc_collective_finalize(request) };
         } else if !self.request.is_null() {
             eprintln!(
                 "dropping an incomplete UCC collective request; leaking it to avoid undefined behavior"
@@ -585,17 +605,24 @@ impl UccCollective {
         check_status(status)
     }
 
-    /// Finalize the collective request, releasing resources.
+    /// Explicitly finalize the collective operation.
+    /// After calling this, the request is invalid and cannot be used.
+    /// Returns Ok(()) if finalized successfully, or if already finalized.
     pub fn finalize(&mut self) -> Result<(), UccStatus> {
-        if self.request.is_null() {
-            return Ok(());
+        let request = mem::replace(&mut self.request, std::ptr::null_mut());
+        if request.is_null() {
+            return Ok(()); // Already finalized
         }
         let status = unsafe {
-            // Safety: self.request is a valid collective request handle.
-            ucc_collective_finalize(self.request)
+            // Safety: request is a valid collective request handle.
+            ucc_collective_finalize(request)
         };
-        self.request = std::ptr::null_mut();
         check_status(status)
+    }
+
+    /// Check if the collective is still valid (has not been finalized).
+    pub fn is_valid(&self) -> bool {
+        !self.request.is_null()
     }
 
     /// Get the raw request handle for internal use.
@@ -633,9 +660,8 @@ impl UccCollective {
 impl Drop for UccCollective {
     fn drop(&mut self) {
         if !self.request.is_null() && self.completed.get() {
-            // Safety: request is a completed, valid handle.
-            let _ = unsafe { ucc_collective_finalize(self.request) };
-            self.request = std::ptr::null_mut();
+            let request = mem::replace(&mut self.request, std::ptr::null_mut());
+            let _ = unsafe { ucc_collective_finalize(request) };
         } else if !self.request.is_null() {
             eprintln!(
                 "dropping an incomplete UCC collective; leaking it to avoid undefined behavior"
@@ -783,5 +809,51 @@ mod tests {
         // This test will be a compile-time check that the method exists
         let _fn_exists: fn(&UccCollectiveRequest) -> Result<(), UccStatus> =
             UccCollectiveRequest::check;
+    }
+
+    #[test]
+    fn test_collective_explicit_finalize() {
+        // This test verifies the finalize() API exists and is callable.
+        // Actual UCC execution requires live resources, so we test the API surface.
+        use std::cell::Cell;
+
+        // Create a mock request structure to test finalize logic
+        let mut mock_request = UccCollectiveRequest {
+            request: std::ptr::null_mut(),
+            completed: Cell::new(false),
+        };
+
+        // Finalize on null request should return Ok
+        assert!(mock_request.finalize().is_ok());
+        assert!(!mock_request.is_valid());
+
+        // is_valid should return false for null request
+        assert!(!mock_request.is_valid());
+    }
+
+    #[test]
+    fn test_collective_is_valid() {
+        use std::cell::Cell;
+
+        let mock_request = UccCollectiveRequest {
+            request: std::ptr::null_mut(),
+            completed: Cell::new(false),
+        };
+
+        assert!(!mock_request.is_valid());
+    }
+
+    #[test]
+    fn test_collective_auto_finalize() {
+        // Verify that Drop does not panic
+        use std::cell::Cell;
+
+        let mock_request = UccCollectiveRequest {
+            request: std::ptr::null_mut(),
+            completed: Cell::new(false),
+        };
+
+        drop(mock_request);
+        // If we reach here, no panic occurred
     }
 }
