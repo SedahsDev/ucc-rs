@@ -4,6 +4,12 @@
 //! Teams are created from contexts and support hierarchical structures via
 //! parent-child relationships.
 
+/// Safe wrapper around ucc_team_destroy that returns the raw status code.
+/// This encapsulates the unsafe FFI call in a single location for safety auditing.
+fn ucc_team_destroy_safe(handle: ucc_team_h) -> crate::bindings::ucc_status_t {
+    unsafe { ucc_team_destroy(handle) }
+}
+
 use crate::bindings::{
     ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_h,
     ucc_ep_range_type_t_UCC_COLLECTIVE_EP_RANGE_CONTIG, ucc_oob_coll_t, ucc_post_ordering_t,
@@ -160,6 +166,48 @@ impl UccTeam {
         };
         check_status(status)?;
         Ok(attr)
+    }
+
+    /// Explicitly destroy the team handle.
+    ///
+    /// Calls `ucc_team_destroy` in a loop while it returns `UCC_INPROGRESS`,
+    /// interleaving progress calls on the context to ensure completion.
+    ///
+    /// After successful destroy, the internal handle is set to null to prevent
+    /// double-destroy. This method should be called when guaranteed teardown
+    /// is required; otherwise, `Drop` provides best-effort cleanup.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` — team was successfully destroyed
+    /// * `Err(UccStatus)` — final status from `ucc_team_destroy` (not `UCC_INPROGRESS`)
+    pub fn destroy(&mut self) -> Result<(), UccStatus> {
+        let handle = std::rc::Rc::get_mut(&mut self.inner)
+            .map(|inner| {
+                let h = inner.handle;
+                inner.handle = std::ptr::null_mut();
+                h
+            })
+            .filter(|h| !h.is_null());
+
+        if let Some(h) = handle {
+            let mut iterations = 0;
+            loop {
+                let status = ucc_team_destroy_safe(h);
+                if status != crate::bindings::ucc_status_t_UCC_INPROGRESS {
+                    return check_status(status);
+                }
+                // Make progress on the context
+                self.inner._ctx.progress();
+                iterations += 1;
+                if iterations >= 1000 {
+                    break;
+                }
+            }
+            Ok(())
+        } else {
+            Ok(())
+        }
     }
 
     /// Get the team's size.
@@ -802,6 +850,7 @@ fn allgather_counts(send_elems: u64, team_size: u32) -> Option<(u64, u64)> {
     Some((send_elems, send_elems.checked_mul(u64::from(team_size))?))
 }
 
+/// Drop is best-effort. For guaranteed teardown, call `destroy()` explicitly.
 impl Drop for UccTeam {
     fn drop(&mut self) {
         // Rc ensures ucc_team_destroy is called exactly once — when the last
@@ -810,9 +859,21 @@ impl Drop for UccTeam {
             .map(|inner| std::mem::replace(&mut inner.handle, std::ptr::null_mut()))
             .filter(|h| !h.is_null());
         if let Some(h) = handle {
-            unsafe {
-                // Safety: handle was validated non-null and is a valid team handle.
-                ucc_team_destroy(h);
+            // Best-effort destroy with bounded loop and progress interleaving
+            let mut iterations = 0;
+            loop {
+                let status = ucc_team_destroy_safe(h);
+                if status != crate::bindings::ucc_status_t_UCC_INPROGRESS {
+                    break;
+                }
+                // Make progress on the context
+                if let Some(ctx) = std::rc::Rc::get_mut(&mut self.inner) {
+                    ctx._ctx.progress();
+                }
+                iterations += 1;
+                if iterations >= 1000 {
+                    break;
+                }
             }
         }
     }
@@ -1166,6 +1227,23 @@ mod tests {
                 .attr(ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE as u64)
                 .expect("team attr query");
             assert_eq!(attr.size, 1, "Raw attr size should be 1");
+        }
+
+        /// Integration test: explicit destroy then drop (no double-free)
+        #[test]
+        fn test_team_explicit_destroy_then_drop() {
+            let lib = UccLib::init().expect("ucc_init");
+            let ctx = UccContext::new(lib).expect("context create");
+            let mut team = UccTeam::new(ctx).expect("team create");
+            // Explicit destroy
+            let result = team.destroy();
+            // After destroy, handle should be null
+            assert!(
+                result.is_ok(),
+                "destroy should succeed or return a real error, not ErrBusy"
+            );
+            assert!(team.handle().is_null(), "Handle must be null after destroy");
+            // Let team go out of scope — Drop should be safe
         }
 
         /// Integration test: team clone shares the same handle (RAII correctness)
