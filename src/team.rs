@@ -201,12 +201,12 @@ impl UccTeam {
     /// }
     /// ```
     #[must_use = "Result should be checked"]
-    pub fn allreduce(
-        &self,
-        buf: &mut [u8],
+    pub fn allreduce<'a>(
+        &'a self,
+        buf: &'a mut [u8],
         datatype: DataType,
         op: ReductionOp,
-    ) -> Result<UccCollectiveRequest, UccStatus> {
+    ) -> Result<UccCollectiveRequest<'a>, UccStatus> {
         use crate::bindings::{
             ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
             ucc_coll_type_t_UCC_COLL_TYPE_ALLREDUCE, ucc_collective_init_and_post,
@@ -248,10 +248,7 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest {
-            request: coll_req,
-            completed: std::cell::Cell::new(false),
-        })
+        Ok(UccCollectiveRequest::new(coll_req))
     }
 
     /// Perform a non-blocking barrier collective operation.
@@ -272,7 +269,7 @@ impl UccTeam {
     /// }
     /// ```
     #[must_use = "Result should be checked"]
-    pub fn barrier(&self) -> Result<UccCollectiveRequest, UccStatus> {
+    pub fn barrier<'a>(&'a self) -> Result<UccCollectiveRequest<'a>, UccStatus> {
         use crate::bindings::{
             ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
             ucc_coll_type_t_UCC_COLL_TYPE_BARRIER, ucc_collective_init_and_post,
@@ -316,10 +313,7 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest {
-            request: coll_req,
-            completed: std::cell::Cell::new(false),
-        })
+        Ok(UccCollectiveRequest::new(coll_req))
     }
 
     /// Perform a non-blocking allgather collective operation.
@@ -352,12 +346,12 @@ impl UccTeam {
     /// }
     /// ```
     #[must_use = "Result should be checked"]
-    pub fn allgather(
-        &self,
-        sendbuf: &[u8],
-        recvbuf: &mut [u8],
+    pub fn allgather<'a>(
+        &'a self,
+        sendbuf: &'a [u8],
+        recvbuf: &'a mut [u8],
         datatype: DataType,
-    ) -> Result<UccCollectiveRequest, UccStatus> {
+    ) -> Result<UccCollectiveRequest<'a>, UccStatus> {
         use crate::bindings::{
             ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
             ucc_coll_type_t_UCC_COLL_TYPE_ALLGATHER, ucc_collective_init_and_post,
@@ -409,10 +403,7 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest {
-            request: coll_req,
-            completed: std::cell::Cell::new(false),
-        })
+        Ok(UccCollectiveRequest::new(coll_req))
     }
 
     /// Perform a non-blocking broadcast collective operation.
@@ -444,12 +435,12 @@ impl UccTeam {
     /// }
     /// ```
     #[must_use = "Result should be checked"]
-    pub fn bcast(
-        &self,
-        buf: &mut [u8],
+    pub fn bcast<'a>(
+        &'a self,
+        buf: &'a mut [u8],
         datatype: DataType,
         root: u32,
-    ) -> Result<UccCollectiveRequest, UccStatus> {
+    ) -> Result<UccCollectiveRequest<'a>, UccStatus> {
         use crate::bindings::{
             ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
             ucc_coll_type_t_UCC_COLL_TYPE_BCAST, ucc_collective_init_and_post,
@@ -491,10 +482,7 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest {
-            request: coll_req,
-            completed: std::cell::Cell::new(false),
-        })
+        Ok(UccCollectiveRequest::new(coll_req))
     }
 
     /// Perform a non-blocking reduce collective operation.
@@ -525,14 +513,14 @@ impl UccTeam {
     /// }
     /// ```
     #[must_use = "Result should be checked"]
-    pub fn reduce(
-        &self,
-        sendbuf: &[u8],
-        recvbuf: &mut [u8],
+    pub fn reduce<'a>(
+        &'a self,
+        sendbuf: &'a [u8],
+        recvbuf: &'a mut [u8],
         datatype: DataType,
         op: ReductionOp,
         root: u32,
-    ) -> Result<UccCollectiveRequest, UccStatus> {
+    ) -> Result<UccCollectiveRequest<'a>, UccStatus> {
         use crate::bindings::{
             ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
             ucc_coll_type_t_UCC_COLL_TYPE_REDUCE, ucc_collective_init_and_post,
@@ -575,21 +563,18 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest {
-            request: coll_req,
-            completed: std::cell::Cell::new(false),
-        })
+        Ok(UccCollectiveRequest::new(coll_req))
     }
 
     /// Non-blocking gather: all ranks send, root receives.
     #[must_use = "Result should be checked"]
-    pub fn gather(
-        &self,
-        sendbuf: &[u8],
-        recvbuf: &mut [u8],
+    pub fn gather<'a>(
+        &'a self,
+        sendbuf: &'a [u8],
+        recvbuf: &'a mut [u8],
         datatype: DataType,
         root: u32,
-    ) -> Result<UccCollectiveRequest, UccStatus> {
+    ) -> Result<UccCollectiveRequest<'a>, UccStatus> {
         use crate::bindings::{
             ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
             ucc_coll_type_t_UCC_COLL_TYPE_GATHER, ucc_collective_init_and_post,
@@ -627,21 +612,18 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest {
-            request: coll_req,
-            completed: std::cell::Cell::new(false),
-        })
+        Ok(UccCollectiveRequest::new(coll_req))
     }
 
     /// Non-blocking scatter: root sends, all ranks receive.
     #[must_use = "Result should be checked"]
-    pub fn scatter(
-        &self,
-        sendbuf: &[u8],
-        recvbuf: &mut [u8],
+    pub fn scatter<'a>(
+        &'a self,
+        sendbuf: &'a [u8],
+        recvbuf: &'a mut [u8],
         datatype: DataType,
         root: u32,
-    ) -> Result<UccCollectiveRequest, UccStatus> {
+    ) -> Result<UccCollectiveRequest<'a>, UccStatus> {
         use crate::bindings::{
             ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
             ucc_coll_type_t_UCC_COLL_TYPE_SCATTER, ucc_collective_init_and_post,
@@ -679,20 +661,17 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest {
-            request: coll_req,
-            completed: std::cell::Cell::new(false),
-        })
+        Ok(UccCollectiveRequest::new(coll_req))
     }
 
     /// Non-blocking alltoall.
     #[must_use = "Result should be checked"]
-    pub fn alltoall(
-        &self,
-        sendbuf: &[u8],
-        recvbuf: &mut [u8],
+    pub fn alltoall<'a>(
+        &'a self,
+        sendbuf: &'a [u8],
+        recvbuf: &'a mut [u8],
         datatype: DataType,
-    ) -> Result<UccCollectiveRequest, UccStatus> {
+    ) -> Result<UccCollectiveRequest<'a>, UccStatus> {
         use crate::bindings::{
             ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
             ucc_coll_type_t_UCC_COLL_TYPE_ALLTOALL, ucc_collective_init_and_post,
@@ -729,21 +708,18 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest {
-            request: coll_req,
-            completed: std::cell::Cell::new(false),
-        })
+        Ok(UccCollectiveRequest::new(coll_req))
     }
 
     /// Non-blocking reduce-scatter.
     #[must_use = "Result should be checked"]
-    pub fn reduce_scatter(
-        &self,
-        sendbuf: &[u8],
-        recvbuf: &mut [u8],
+    pub fn reduce_scatter<'a>(
+        &'a self,
+        sendbuf: &'a [u8],
+        recvbuf: &'a mut [u8],
         datatype: DataType,
         op: ReductionOp,
-    ) -> Result<UccCollectiveRequest, UccStatus> {
+    ) -> Result<UccCollectiveRequest<'a>, UccStatus> {
         use crate::bindings::{
             ucc_coll_args, ucc_coll_callback, ucc_coll_id_t, ucc_coll_req_h,
             ucc_coll_type_t_UCC_COLL_TYPE_REDUCE_SCATTER, ucc_collective_init_and_post,
@@ -791,10 +767,7 @@ impl UccTeam {
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
-        Ok(UccCollectiveRequest {
-            request: coll_req,
-            completed: std::cell::Cell::new(false),
-        })
+        Ok(UccCollectiveRequest::new(coll_req))
     }
 }
 
@@ -810,9 +783,20 @@ impl Drop for UccTeam {
             .map(|inner| std::mem::replace(&mut inner.handle, std::ptr::null_mut()))
             .filter(|h| !h.is_null());
         if let Some(h) = handle {
-            unsafe {
-                // Safety: handle was validated non-null and is a valid team handle.
-                ucc_team_destroy(h);
+            // Loop to handle UCC_INPROGRESS from destroy
+            loop {
+                let status = unsafe { ucc_team_destroy(h) };
+                if status == crate::bindings::ucc_status_t_UCC_OK {
+                    break;
+                }
+                if status == crate::bindings::ucc_status_t_UCC_INPROGRESS {
+                    // Best-effort progress in Drop - do not block indefinitely
+                    self.inner._ctx.progress();
+                    // Continue looping - UCC will eventually complete
+                    continue;
+                }
+                // Other errors: log but don't panic in Drop
+                break;
             }
         }
     }
