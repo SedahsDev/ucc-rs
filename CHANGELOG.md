@@ -7,6 +7,10 @@
 - `UccCollective` also now has a lifetime parameter `'a`.
 - `CollectiveBuilder::init` and `CollectiveBuilder::init_and_post` now return `Result<UccCollective<'a>, UccStatus>`.
 - `as_raw()` on `UccCollectiveType`, `UccReductionOp`, and `DataType` is now `pub(crate)`; bindgen types (`ucc_coll_type_t`, `ucc_reduction_op_t`, `ucc_datatype_t`, `ucc_coll_req_h`) no longer appear in public signatures.
+- `handle()` on `UccLibConfig`, `UccLib`, `UccContext`, `UccTeam`, and `UccMemHandle` is now `pub(crate)` (`UccMemHandle::handle` is test-only); the bindgen handle types (`ucc_lib_h`, `ucc_lib_config_h`, `ucc_context_h`, `ucc_team_h`, `ucc_mem_map_mem_h`) no longer appear in public signatures.
+
+### Features
+- `UccLib::finalize(&mut self) -> Result<(), UccStatus>`: explicit, fallible teardown of the library handle (#25). Rejected with an error while other `UccLib` clones exist or after a prior finalize; `Drop` still auto-finalizes when `finalize()` was not called.
 
 ### Fixes
 - `UccTeam::drop` now properly handles `UCC_INPROGRESS` from `ucc_team_destroy` by looping with context progress.

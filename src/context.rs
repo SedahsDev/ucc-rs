@@ -166,7 +166,7 @@ impl UccContext {
     }
 
     /// Get a raw handle for use with lower-level APIs.
-    pub fn handle(&self) -> ucc_context_h {
+    pub(crate) fn handle(&self) -> ucc_context_h {
         self.inner.handle
     }
 
