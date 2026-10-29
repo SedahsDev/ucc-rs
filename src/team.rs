@@ -137,7 +137,7 @@ impl UccTeam {
     }
 
     /// Get a raw handle for use with lower-level APIs.
-    pub fn handle(&self) -> ucc_team_h {
+    pub(crate) fn handle(&self) -> ucc_team_h {
         self.inner.handle
     }
 

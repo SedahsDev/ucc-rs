@@ -80,7 +80,7 @@ impl UccLibConfig {
     }
 
     /// Get the raw config handle.
-    pub fn handle(&self) -> ucc_lib_config_h {
+    pub(crate) fn handle(&self) -> ucc_lib_config_h {
         self.handle
     }
 }
@@ -166,7 +166,7 @@ impl UccLib {
     }
 
     /// Get a raw handle for use with lower-level APIs.
-    pub fn handle(&self) -> ucc_lib_h {
+    pub(crate) fn handle(&self) -> ucc_lib_h {
         self.inner.handle
     }
 
