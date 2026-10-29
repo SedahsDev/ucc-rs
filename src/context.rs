@@ -166,7 +166,7 @@ impl UccContext {
     }
 
     /// Get a raw handle for use with lower-level APIs.
-    pub fn handle(&self) -> ucc_context_h {
+    pub(crate) fn handle(&self) -> ucc_context_h {
         self.inner.handle
     }
 
@@ -212,6 +212,7 @@ impl UccContext {
     }
 }
 
+/// ucc_context_destroy is single-shot; no INPROGRESS loop required.
 impl Drop for UccContext {
     fn drop(&mut self) {
         // Rc ensures ucc_context_destroy is called exactly once — when the last

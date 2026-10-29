@@ -7,7 +7,7 @@ license = "BSD-3-Clause"
 readme = "README.md"
 keywords = ["ucc", "hpc", "collectives", "ucx"]
 categories = ["api-bindings", "science"]
-repository = "https://github.com/KirgenR/ucc-rs"
+repository = "https://github.com/SedahsDev/ucc-rs"
 
 [build-dependencies]
 bindgen = "0.70.1"
