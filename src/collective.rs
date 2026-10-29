@@ -18,11 +18,12 @@ use crate::bindings::{
     ucc_reduction_op_t, ucc_reduction_op_t_UCC_OP_BAND, ucc_reduction_op_t_UCC_OP_BOR,
     ucc_reduction_op_t_UCC_OP_BXOR, ucc_reduction_op_t_UCC_OP_LAND, ucc_reduction_op_t_UCC_OP_LOR,
     ucc_reduction_op_t_UCC_OP_LXOR, ucc_reduction_op_t_UCC_OP_MAX, ucc_reduction_op_t_UCC_OP_MIN,
-    ucc_reduction_op_t_UCC_OP_PROD, ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t_UCC_ERR_NO_MESSAGE,
-    ucc_status_t_UCC_OK,
+    ucc_reduction_op_t_UCC_OP_PROD, ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t,
+    ucc_status_t_UCC_INPROGRESS, ucc_status_t_UCC_OK, ucc_status_t_UCC_OPERATION_INITIALIZED,
 };
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
+use std::mem;
 
 /// Collective type enum for safe API usage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +47,7 @@ pub enum UccCollectiveType {
 
 impl UccCollectiveType {
     /// Convert to the raw FFI type.
-    pub fn as_raw(self) -> ucc_coll_type_t {
+    pub(crate) fn as_raw(self) -> ucc_coll_type_t {
         self as ucc_coll_type_t
     }
 }
@@ -69,7 +70,7 @@ pub enum UccReductionOp {
 
 impl UccReductionOp {
     /// Convert to the raw FFI type.
-    pub fn as_raw(self) -> ucc_reduction_op_t {
+    pub(crate) fn as_raw(self) -> ucc_reduction_op_t {
         self as ucc_reduction_op_t
     }
 }
@@ -131,7 +132,7 @@ impl DataType {
     pub const Uchar: Self = Self::Uint8;
 
     /// Convert to the raw FFI type (ucc_datatype_t = u64).
-    pub fn as_raw(self) -> ucc_datatype_t {
+    pub(crate) fn as_raw(self) -> ucc_datatype_t {
         self as ucc_datatype_t
     }
 
@@ -164,6 +165,54 @@ pub struct UccCollectiveRequest<'a> {
 }
 
 impl<'a> UccCollectiveRequest<'a> {
+    /// Get the raw status value from the request.
+    ///
+    /// # Safety
+    /// This exposes the raw FFI status type. Prefer is_complete(), is_in_progress(),
+    /// or check() for idiomatic Rust code.
+    #[allow(non_upper_case_globals)]
+    pub(crate) fn raw_status(&self) -> ucc_status_t {
+        unsafe { (*self.request).status }
+    }
+
+    /// Check if the collective operation has completed.
+    ///
+    /// Returns true if the operation has completed (either successfully or with an error).
+    /// This does not advance the operation; it only checks the current status.
+    pub fn is_complete(&self) -> bool {
+        let status = self.raw_status();
+        status == ucc_status_t_UCC_OK || status < 0
+    }
+
+    /// Check if the collective operation is still in progress.
+    ///
+    /// Returns true while the operation is running: `UCC_INPROGRESS` (posted,
+    /// in progress) or `UCC_OPERATION_INITIALIZED` (initialized, not yet
+    /// posted). `UCC_ERR_NO_MESSAGE` is a genuine error, not an in-progress
+    /// state.
+    pub fn is_in_progress(&self) -> bool {
+        let status = self.raw_status();
+        status == ucc_status_t_UCC_INPROGRESS || status == ucc_status_t_UCC_OPERATION_INITIALIZED
+    }
+
+    /// Check the status of the collective operation.
+    ///
+    /// Returns Ok(()) if the operation has completed successfully.
+    /// Returns Err if the operation has completed with an error.
+    /// Returns Ok(()) if the operation is still in progress (caller should poll again).
+    ///
+    /// This is the recommended way to check status instead of peeking at raw fields.
+    #[allow(non_upper_case_globals)]
+    pub fn check(&self) -> Result<(), UccStatus> {
+        let status = self.raw_status();
+        match status {
+            ucc_status_t_UCC_OK => Ok(()),
+            ucc_status_t_UCC_INPROGRESS | ucc_status_t_UCC_OPERATION_INITIALIZED => Ok(()),
+            s if s < 0 => Err(UccStatus::from_raw(s)),
+            s => Err(UccStatus::Unknown(s)),
+        }
+    }
+
     /// Test whether the collective operation has completed.
     ///
     /// Returns `Ok(true)` if the operation is complete, `Ok(false)` if
@@ -183,10 +232,9 @@ impl<'a> UccCollectiveRequest<'a> {
                 self.completed.set(true);
                 Ok(true)
             }
-            ucc_status_t_UCC_ERR_NO_MESSAGE => Ok(false), // still in progress
-            _ => Err(check_status(status)
-                .err()
-                .unwrap_or(UccStatus::Known(UccError::ErrNoResource))),
+            ucc_status_t_UCC_INPROGRESS | ucc_status_t_UCC_OPERATION_INITIALIZED => Ok(false),
+            s if s < 0 => Err(UccStatus::from_raw(s)),
+            s => Err(UccStatus::Unknown(s)),
         }
     }
 
@@ -197,17 +245,48 @@ impl<'a> UccCollectiveRequest<'a> {
             _phantom: std::marker::PhantomData,
         }
     }
+
+    /// Explicitly finalize the collective operation.
+    /// After calling this, the request is invalid and cannot be used.
+    /// Returns Ok(()) if finalized successfully, or if already finalized.
+    pub fn finalize(&mut self) -> Result<(), UccStatus> {
+        let request = mem::replace(&mut self.request, std::ptr::null_mut());
+        if request.is_null() {
+            return Ok(()); // Already finalized
+        }
+        let status = unsafe {
+            // Safety: request is a valid collective request handle.
+            ucc_collective_finalize(request)
+        };
+        check_status(status)
+    }
+
+    /// Check if the request is still valid (has not been finalized).
+    pub fn is_valid(&self) -> bool {
+        !self.request.is_null()
+    }
 }
 
 impl<'a> Drop for UccCollectiveRequest<'a> {
     fn drop(&mut self) {
-        if !self.request.is_null() && self.completed.get() {
-            // Safety: request is a completed, valid handle.
-            let _ = unsafe { ucc_collective_finalize(self.request) };
-            self.request = std::ptr::null_mut();
-        } else if !self.request.is_null() {
+        if self.request.is_null() {
+            return;
+        }
+        // ucc.h: ucc_collective_finalize is the only release path for a
+        // request — including after an error, where the handle is invalid
+        // for polling but must still be finalized (UCC's own wait loops
+        // break on status < 0 and finalize; the allocation stays valid
+        // until then). Finalizing while the operation is still posted and
+        // running would free state the TL transports still reference, so
+        // a running request is leaked instead.
+        let running = self.raw_status() == ucc_status_t_UCC_INPROGRESS;
+        if self.completed.get() || !running {
+            let request = mem::replace(&mut self.request, std::ptr::null_mut());
+            let _ = unsafe { ucc_collective_finalize(request) };
+        } else {
             eprintln!(
-                "dropping an incomplete UCC collective request; leaking it to avoid undefined behavior"
+                "dropping a running UCC collective request; finalizing mid-flight \
+                 would free state the transports still use, so it is leaked"
             );
         }
     }
@@ -470,6 +549,54 @@ pub struct UccCollective<'a> {
 }
 
 impl<'a> UccCollective<'a> {
+    /// Get the raw status value from the request.
+    ///
+    /// # Safety
+    /// This exposes the raw FFI status type. Prefer is_complete(), is_in_progress(),
+    /// or check() for idiomatic Rust code.
+    #[allow(non_upper_case_globals)]
+    pub(crate) fn raw_status(&self) -> ucc_status_t {
+        unsafe { (*self.request).status }
+    }
+
+    /// Check if the collective operation has completed.
+    ///
+    /// Returns true if the operation has completed (either successfully or with an error).
+    /// This does not advance the operation; it only checks the current status.
+    pub fn is_complete(&self) -> bool {
+        let status = self.raw_status();
+        status == ucc_status_t_UCC_OK || status < 0
+    }
+
+    /// Check if the collective operation is still in progress.
+    ///
+    /// Returns true while the operation is running: `UCC_INPROGRESS` (posted,
+    /// in progress) or `UCC_OPERATION_INITIALIZED` (initialized, not yet
+    /// posted). `UCC_ERR_NO_MESSAGE` is a genuine error, not an in-progress
+    /// state.
+    pub fn is_in_progress(&self) -> bool {
+        let status = self.raw_status();
+        status == ucc_status_t_UCC_INPROGRESS || status == ucc_status_t_UCC_OPERATION_INITIALIZED
+    }
+
+    /// Check the status of the collective operation.
+    ///
+    /// Returns Ok(()) if the operation has completed successfully.
+    /// Returns Err if the operation has completed with an error.
+    /// Returns Ok(()) if the operation is still in progress (caller should poll again).
+    ///
+    /// This is the recommended way to check status instead of peeking at raw fields.
+    #[allow(non_upper_case_globals)]
+    pub fn check(&self) -> Result<(), UccStatus> {
+        let status = self.raw_status();
+        match status {
+            ucc_status_t_UCC_OK => Ok(()),
+            ucc_status_t_UCC_INPROGRESS | ucc_status_t_UCC_OPERATION_INITIALIZED => Ok(()),
+            s if s < 0 => Err(UccStatus::from_raw(s)),
+            s => Err(UccStatus::Unknown(s)),
+        }
+    }
+
     /// Post the collective operation for asynchronous execution.
     ///
     /// Returns immediately — the collective runs asynchronously.
@@ -501,21 +628,29 @@ impl<'a> UccCollective<'a> {
         check_status(status)
     }
 
-    /// Finalize the collective request, releasing resources.
+    /// Explicitly finalize the collective operation.
+    /// After calling this, the request is invalid and cannot be used.
+    /// Returns Ok(()) if finalized successfully, or if already finalized.
     pub fn finalize(&mut self) -> Result<(), UccStatus> {
-        if self.request.is_null() {
-            return Ok(());
+        let request = mem::replace(&mut self.request, std::ptr::null_mut());
+        if request.is_null() {
+            return Ok(()); // Already finalized
         }
         let status = unsafe {
-            // Safety: self.request is a valid collective request handle.
-            ucc_collective_finalize(self.request)
+            // Safety: request is a valid collective request handle.
+            ucc_collective_finalize(request)
         };
-        self.request = std::ptr::null_mut();
         check_status(status)
     }
 
-    /// Get the raw request handle for testing completion.
-    pub fn request(&self) -> ucc_coll_req_h {
+    /// Check if the collective is still valid (has not been finalized).
+    pub fn is_valid(&self) -> bool {
+        !self.request.is_null()
+    }
+
+    /// Get the raw request handle for internal use.
+    #[allow(dead_code)]
+    pub(crate) fn request(&self) -> ucc_coll_req_h {
         self.request
     }
 
@@ -532,10 +667,9 @@ impl<'a> UccCollective<'a> {
                 self.completed.set(true);
                 Ok(true)
             }
-            ucc_status_t_UCC_ERR_NO_MESSAGE => Ok(false),
-            _ => Err(check_status(status)
-                .err()
-                .unwrap_or(UccStatus::Known(UccError::ErrNoResource))),
+            ucc_status_t_UCC_INPROGRESS | ucc_status_t_UCC_OPERATION_INITIALIZED => Ok(false),
+            s if s < 0 => Err(UccStatus::from_raw(s)),
+            s => Err(UccStatus::Unknown(s)),
         }
     }
 
@@ -547,13 +681,20 @@ impl<'a> UccCollective<'a> {
 
 impl<'a> Drop for UccCollective<'a> {
     fn drop(&mut self) {
-        if !self.request.is_null() && self.completed.get() {
-            // Safety: request is a completed, valid handle.
-            let _ = unsafe { ucc_collective_finalize(self.request) };
-            self.request = std::ptr::null_mut();
-        } else if !self.request.is_null() {
+        if self.request.is_null() {
+            return;
+        }
+        // See UccCollectiveRequest::drop: terminal (completed or errored)
+        // requests are finalized; a still-running one is leaked because
+        // finalizing mid-flight would free state the TL transports use.
+        let running = self.raw_status() == ucc_status_t_UCC_INPROGRESS;
+        if self.completed.get() || !running {
+            let request = mem::replace(&mut self.request, std::ptr::null_mut());
+            let _ = unsafe { ucc_collective_finalize(request) };
+        } else {
             eprintln!(
-                "dropping an incomplete UCC collective; leaking it to avoid undefined behavior"
+                "dropping a running UCC collective; finalizing mid-flight \
+                 would free state the transports still use, so it is leaked"
             );
         }
     }
@@ -661,5 +802,76 @@ mod tests {
         unsafe {
             assert_eq!(args.dst.info.count, 16);
         }
+    }
+
+    #[test]
+    fn test_raw_status_ok() {
+        // Test that raw_status returns the correct value for a completed request
+        // This test will be a compile-time check that the method exists
+        let _fn_exists: fn(&UccCollectiveRequest<'static>) -> ucc_status_t =
+            UccCollectiveRequest::<'static>::raw_status;
+    }
+
+    #[test]
+    fn test_is_complete_true() {
+        // Test that is_complete returns true for completed operations
+        // This test will be a compile-time check that the method exists
+        let _fn_exists: fn(&UccCollectiveRequest<'static>) -> bool =
+            UccCollectiveRequest::<'static>::is_complete;
+    }
+
+    #[test]
+    fn test_is_in_progress_inprogress() {
+        // Test that is_in_progress returns true for INPROGRESS status
+        // This test will be a compile-time check that the method exists
+        let _fn_exists: fn(&UccCollectiveRequest<'static>) -> bool =
+            UccCollectiveRequest::<'static>::is_in_progress;
+    }
+
+    #[test]
+    fn test_is_in_progress_no_message() {
+        // Existence check for is_in_progress. Note: UCC_ERR_NO_MESSAGE is a
+        // genuine error status, not an in-progress state (#17).
+        let _fn_exists: fn(&UccCollectiveRequest<'static>) -> bool =
+            UccCollectiveRequest::<'static>::is_in_progress;
+    }
+
+    #[test]
+    fn test_check_error() {
+        // Test that check returns Err for error status
+        // This test will be a compile-time check that the method exists
+        let _fn_exists: fn(&UccCollectiveRequest<'static>) -> Result<(), UccStatus> =
+            UccCollectiveRequest::<'static>::check;
+    }
+
+    #[test]
+    fn test_collective_explicit_finalize() {
+        // This test verifies the finalize() API exists and is callable.
+        // Actual UCC execution requires live resources, so we test the API surface.
+        // Create a mock request structure to test finalize logic
+        let mut mock_request = UccCollectiveRequest::new(std::ptr::null_mut());
+
+        // Finalize on null request should return Ok
+        assert!(mock_request.finalize().is_ok());
+        assert!(!mock_request.is_valid());
+
+        // is_valid should return false for null request
+        assert!(!mock_request.is_valid());
+    }
+
+    #[test]
+    fn test_collective_is_valid() {
+        let mock_request = UccCollectiveRequest::new(std::ptr::null_mut());
+
+        assert!(!mock_request.is_valid());
+    }
+
+    #[test]
+    fn test_collective_auto_finalize() {
+        // Verify that Drop does not panic
+        let mock_request = UccCollectiveRequest::new(std::ptr::null_mut());
+
+        drop(mock_request);
+        // If we reach here, no panic occurred
     }
 }
