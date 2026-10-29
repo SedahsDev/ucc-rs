@@ -11,6 +11,15 @@
 //! Convert between raw `ucc_status_t` and [`UccStatus`] with
 //! [`UccStatus::from_raw`] / [`UccStatus::to_raw`].
 //!
+//! # UCC Status Encoding
+//!
+//! UCC status codes are encoded as `i32` values:
+//!
+//! * `UCC_OK` (0) — operation completed successfully.
+//! * `UCC_INPROGRESS` (-1) — operation still running.
+//! * `UCC_ERR_NO_MESSAGE` (-39) — no message available (treated as in-progress for collectives).
+//! * All other negative values are error codes.
+//!
 //! # Example
 //!
 //! ```
@@ -22,6 +31,30 @@
 //! ```
 
 use crate::bindings::ucc_status_t;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Status helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Returns `true` if the status indicates the operation is in progress.
+///
+/// This returns `true` for both `UCC_INPROGRESS` (-1) and `UCC_ERR_NO_MESSAGE` (-39),
+/// as both are treated as in-progress for collective operations.
+pub fn is_status_in_progress(status: ucc_status_t) -> bool {
+    status == -1 || status == -39
+}
+
+/// Returns `true` if the status indicates successful completion.
+pub fn is_status_ok(status: ucc_status_t) -> bool {
+    status == 0
+}
+
+/// Returns `true` if the status indicates an error.
+///
+/// This returns `true` for all negative values except `UCC_ERR_NO_MESSAGE` (-39).
+pub fn is_status_error(status: ucc_status_t) -> bool {
+    status < 0 && status != -39
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UccError — known, standard UCC status codes
@@ -284,6 +317,35 @@ mod tests {
     use static_assertions::assert_impl_all;
     use std::fmt::Debug;
     use std::hash::Hash;
+
+    // ── Status helper functions ────────────────────────────────────────────
+
+    #[test]
+    fn test_status_is_ok() {
+        assert!(is_status_ok(0));
+        assert!(!is_status_ok(1));
+        assert!(!is_status_ok(-1));
+        assert!(!is_status_ok(-39));
+        assert!(!is_status_ok(-999));
+    }
+
+    #[test]
+    fn test_status_is_inprogress() {
+        assert!(is_status_in_progress(-1));
+        assert!(is_status_in_progress(-39));
+        assert!(!is_status_in_progress(0));
+        assert!(!is_status_in_progress(1));
+        assert!(!is_status_in_progress(-100));
+    }
+
+    #[test]
+    fn test_status_is_error() {
+        assert!(!is_status_error(0));
+        assert!(!is_status_error(-39));
+        assert!(is_status_error(-1));
+        assert!(is_status_error(-100));
+        assert!(is_status_error(-999));
+    }
 
     // ── Compile-time trait checks ──────────────────────────────────────────
 

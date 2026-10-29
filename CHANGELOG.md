@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add safe status helpers (raw_status, is_complete, is_in_progress, check) to UccCollective and UccCollectiveRequest; mark request() as pub(crate)
+- Fix CollectiveBuilder allgather truncation: add with_dst_count() to express asymmetric src/dst counts
 - fix: correct status classification in collective test methods (UCC_INPROGRESS treated as in-progress, UCC_ERR_NO_MESSAGE treated as error)
 
 ## 0.1.0
