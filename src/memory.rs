@@ -119,8 +119,9 @@ impl UccMemHandle {
         }
     }
 
-    /// Get the raw memory handle.
-    pub fn handle(&self) -> ucc_mem_map_mem_h {
+    /// Get the raw memory handle (used by tests; unmap needs no raw handle).
+    #[cfg(test)]
+    pub(crate) fn handle(&self) -> ucc_mem_map_mem_h {
         self.memh
     }
 
