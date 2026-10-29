@@ -80,7 +80,7 @@ impl UccLibConfig {
     }
 
     /// Get the raw config handle.
-    pub fn handle(&self) -> ucc_lib_config_h {
+    pub(crate) fn handle(&self) -> ucc_lib_config_h {
         self.handle
     }
 }
@@ -104,6 +104,7 @@ impl Drop for UccLibConfig {
 /// Note: UCC handles are thread-local by design, so `Rc` (not `Arc`) is correct.
 struct UccLibInner {
     handle: ucc_lib_h,
+    finalized: std::cell::Cell<bool>,
 }
 
 /// UCC library handle with RAII cleanup.
@@ -157,13 +158,42 @@ impl UccLib {
         check_status(status)?;
         // config is dropped here, releasing the config handle
         Ok(Self {
-            inner: std::rc::Rc::new(UccLibInner { handle: lib }),
+            inner: std::rc::Rc::new(UccLibInner {
+                handle: lib,
+                finalized: std::cell::Cell::new(false),
+            }),
         })
     }
 
     /// Get a raw handle for use with lower-level APIs.
-    pub fn handle(&self) -> ucc_lib_h {
+    pub(crate) fn handle(&self) -> ucc_lib_h {
         self.inner.handle
+    }
+
+    /// Explicitly finalize the UCC library.
+    ///
+    /// This method requires exclusive access to the shared inner state. If
+    /// other `UccLib` clones exist, finalization is rejected. If the library
+    /// has already been finalized, it returns an error.
+    #[must_use = "Result should be checked"]
+    pub fn finalize(&mut self) -> Result<(), UccStatus> {
+        // Rc::get_mut returns None if any other clones exist.
+        let inner = std::rc::Rc::get_mut(&mut self.inner)
+            .ok_or(UccStatus::Known(crate::UccError::ErrInvalidParam))?;
+        if inner.finalized.get() {
+            return Err(UccStatus::Known(crate::UccError::ErrInvalidParam));
+        }
+        let handle = std::mem::replace(&mut inner.handle, std::ptr::null_mut());
+        if handle.is_null() {
+            return Ok(());
+        }
+        let status = unsafe {
+            // Safety: handle was validated non-null and is a valid lib handle.
+            ucc_finalize(handle)
+        };
+        check_status(status)?;
+        inner.finalized.set(true);
+        Ok(())
     }
 
     /// Query library attributes.
@@ -199,16 +229,20 @@ impl UccLib {
 
 impl Drop for UccLib {
     fn drop(&mut self) {
+        // ucc_finalize is single-shot; no INPROGRESS loop required.
         // Rc ensures ucc_finalize is called exactly once — when the last
         // UccLib clone is dropped. We also null the handle to guard against
         // any edge case, though Rc::drop handles this correctly.
-        let handle = std::rc::Rc::get_mut(&mut self.inner)
-            .map(|inner| std::mem::replace(&mut inner.handle, std::ptr::null_mut()))
-            .filter(|h| !h.is_null());
-        if let Some(h) = handle {
-            unsafe {
-                // Safety: handle was validated non-null and is a valid lib handle.
-                ucc_finalize(h);
+        if let Some(inner) = std::rc::Rc::get_mut(&mut self.inner) {
+            if inner.finalized.get() {
+                return;
+            }
+            let handle = std::mem::replace(&mut inner.handle, std::ptr::null_mut());
+            if !handle.is_null() {
+                unsafe {
+                    // Safety: handle was validated non-null and is a valid lib handle.
+                    ucc_finalize(handle);
+                }
             }
         }
     }
