@@ -229,6 +229,7 @@ impl UccLib {
 
 impl Drop for UccLib {
     fn drop(&mut self) {
+        // ucc_finalize is single-shot; no INPROGRESS loop required.
         // Rc ensures ucc_finalize is called exactly once — when the last
         // UccLib clone is dropped. We also null the handle to guard against
         // any edge case, though Rc::drop handles this correctly.

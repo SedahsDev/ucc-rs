@@ -212,6 +212,7 @@ impl UccContext {
     }
 }
 
+/// ucc_context_destroy is single-shot; no INPROGRESS loop required.
 impl Drop for UccContext {
     fn drop(&mut self) {
         // Rc ensures ucc_context_destroy is called exactly once — when the last

@@ -15,6 +15,7 @@
 ### Fixes
 - `UccTeam::drop` now properly handles `UCC_INPROGRESS` from `ucc_team_destroy` by looping with context progress.
 - Add safe status helpers (raw_status, is_complete, is_in_progress, check) to UccCollective and UccCollectiveRequest; mark request() as pub(crate)
+- Fix `UccTeam::drop` to re-drive `ucc_team_destroy` on `UCC_INPROGRESS`; add fallible `UccTeam::destroy()` for explicit teardown
 - Fix CollectiveBuilder allgather truncation: add with_dst_count() to express asymmetric src/dst counts
 - fix(#17): correct UCC status classification in collective `test()` and the status helpers (`UCC_INPROGRESS`/`UCC_OPERATION_INITIALIZED` = in progress, negative = error, `UCC_ERR_NO_MESSAGE` no longer special-cased) and finalize completed-or-errored requests on drop instead of leaking them
 
