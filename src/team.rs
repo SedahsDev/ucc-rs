@@ -5,7 +5,7 @@
 //! parent-child relationships.
 
 use crate::bindings::{
-    ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_h,
+    ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_h,
     ucc_ep_range_type_t_UCC_COLLECTIVE_EP_RANGE_CONTIG, ucc_oob_coll_t, ucc_post_ordering_t,
     ucc_post_ordering_t_UCC_COLLECTIVE_POST_ORDERED, ucc_status_t_UCC_OK, ucc_team_attr,
     ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_EP, ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE,
@@ -20,6 +20,7 @@ use crate::bindings::{
 };
 use crate::collective::{DataType, ReductionOp, UccCollectiveRequest};
 use crate::context::UccContext;
+use crate::lib_init::UccSyncType;
 use crate::status::{check_status, UccError, UccStatus};
 
 /// Internal shared state for UccTeam — Rc-backed so clones share the
@@ -876,8 +877,8 @@ impl UccTeamParams {
     }
 
     /// Set the collective sync type.
-    pub fn with_sync_type(&mut self, sync_type: ucc_coll_sync_type_t) -> &mut Self {
-        self.params.sync_type = sync_type;
+    pub fn with_sync_type(&mut self, sync_type: UccSyncType) -> &mut Self {
+        self.params.sync_type = sync_type.into();
         self.params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_SYNC_TYPE as u64;
         self
     }
