@@ -22,6 +22,10 @@ use crate::bindings::{
     ucc_status_t_UCC_INPROGRESS, ucc_status_t_UCC_OK, ucc_status_t_UCC_OPERATION_INITIALIZED,
 };
 
+extern "C" {
+    fn ucc_collective_test(request: ucc_coll_req_h) -> ucc_status_t;
+}
+
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
 use std::mem;
@@ -173,7 +177,7 @@ impl<'a> UccCollectiveRequest<'a> {
     /// or check() for idiomatic Rust code.
     #[allow(non_upper_case_globals)]
     pub(crate) fn raw_status(&self) -> ucc_status_t {
-        unsafe { (*self.request).status }
+        unsafe { ucc_collective_test(self.request) }
     }
 
     /// Check if the collective operation has completed.
@@ -219,13 +223,12 @@ impl<'a> UccCollectiveRequest<'a> {
     /// Returns `Ok(true)` if the operation is complete, `Ok(false)` if
     /// still in progress, or `Err` if the operation failed.
     ///
-    /// This is a Rust equivalent of the C `ucc_collective_test()` inline
-    /// function — reads `request->status` directly.
+    /// Calls the C `ucc_collective_test()` function to poll the request.
     #[allow(non_upper_case_globals)]
     pub fn test(&self) -> Result<bool, UccStatus> {
         let status = unsafe {
             // Safety: self.request is a valid handle from ucc_collective_init_and_post.
-            (*self.request).status
+            ucc_collective_test(self.request)
         };
         match status {
             ucc_status_t_UCC_OK => {
@@ -556,7 +559,7 @@ impl<'a> UccCollective<'a> {
     /// or check() for idiomatic Rust code.
     #[allow(non_upper_case_globals)]
     pub(crate) fn raw_status(&self) -> ucc_status_t {
-        unsafe { (*self.request).status }
+        unsafe { ucc_collective_test(self.request) }
     }
 
     /// Check if the collective operation has completed.
@@ -655,11 +658,13 @@ impl<'a> UccCollective<'a> {
     }
 
     /// Test whether this collective has completed and track completion for drop.
+    ///
+    /// Calls the C `ucc_collective_test()` function to poll the request.
     #[allow(non_upper_case_globals)]
     pub fn test(&self) -> Result<bool, UccStatus> {
         let status = unsafe {
             // SAFETY: self.request is a valid handle from ucc_collective_init_and_post.
-            (*self.request).status
+            ucc_collective_test(self.request)
         };
         match status {
             ucc_status_t_UCC_OK => {
