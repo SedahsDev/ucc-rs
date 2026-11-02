@@ -24,6 +24,28 @@ use crate::bindings::{
 use crate::context::UccContext;
 use crate::status::{check_status, UccError, UccStatus};
 
+/// Opaque handle to a mapped memory region.
+///
+/// This type wraps the raw `ucc_mem_map_mem_h` pointer and prevents
+/// direct access to the bindgen type from outside this module.
+#[derive(Clone)]
+pub struct UccMemHandleHandle {
+    ptr: ucc_mem_map_mem_h,
+}
+
+impl UccMemHandleHandle {
+    /// Create a new handle from a raw pointer.
+    pub(crate) fn from_raw(ptr: ucc_mem_map_mem_h) -> Self {
+        Self { ptr }
+    }
+
+    /// Get the raw pointer. This is test-only.
+    #[cfg(test)]
+    pub(crate) fn as_raw(&self) -> ucc_mem_map_mem_h {
+        self.ptr
+    }
+}
+
 /// Memory handle with RAII cleanup.
 ///
 /// Represents a memory region registered with UCC. The handle holds the
@@ -35,7 +57,7 @@ use crate::status::{check_status, UccError, UccStatus};
 /// handle. UCC does not copy the data — it only records the address and
 /// length for later use by collective operations.
 pub struct UccMemHandle {
-    memh: ucc_mem_map_mem_h,
+    memh: UccMemHandleHandle,
     mapped_len: usize,
 }
 
@@ -75,12 +97,12 @@ impl UccMemHandle {
                 &mut memh,
             )
         };
-        check_status(status)?;
+        check_status(UccStatus::from_raw(status))?;
         if memh.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
         Ok(Self {
-            memh,
+            memh: UccMemHandleHandle::from_raw(memh),
             mapped_len: length,
         })
     }
@@ -121,8 +143,8 @@ impl UccMemHandle {
 
     /// Get the raw memory handle (used by tests; unmap needs no raw handle).
     #[cfg(test)]
-    pub(crate) fn handle(&self) -> ucc_mem_map_mem_h {
-        self.memh
+    pub(crate) fn handle(&self) -> UccMemHandleHandle {
+        self.memh.clone()
     }
 
     /// Get the length of the mapped memory region.
@@ -133,13 +155,13 @@ impl UccMemHandle {
 
 impl Drop for UccMemHandle {
     fn drop(&mut self) {
-        if !self.memh.is_null() {
-            let mut memh = self.memh;
+        if !self.memh.ptr.is_null() {
+            let mut memh = self.memh.ptr;
             unsafe {
                 // Safety: mem_handle was validated non-null above; safe to unmap in Drop.
                 ucc_mem_unmap(&mut memh);
             }
-            self.memh = std::ptr::null_mut();
+            self.memh = UccMemHandleHandle::from_raw(std::ptr::null_mut());
         }
     }
 }
@@ -166,7 +188,7 @@ mod tests {
                 "mapped_len should match slice length"
             );
             assert!(
-                !handle.handle().is_null(),
+                !handle.handle().as_raw().is_null(),
                 "memory handle should be non-null"
             );
             // handle dropped here — ucc_mem_unmap called automatically

@@ -37,7 +37,7 @@ impl UccLibConfig {
             // and accepts NULL for the first two arguments (lib and parent config).
             ucc_lib_config_read(std::ptr::null(), std::ptr::null(), &mut config)
         };
-        check_status(status)?;
+        check_status(UccStatus::from_raw(status))?;
         Ok(Self { handle: config })
     }
 
@@ -76,7 +76,7 @@ impl UccLibConfig {
             // ucc_lib_config_modify takes 3 args: (config, name, value)
             ucc_lib_config_modify(self.handle, c_name.as_ptr(), c_value.as_ptr())
         };
-        check_status(status)
+        check_status(UccStatus::from_raw(status))
     }
 
     /// Get the raw config handle.
@@ -155,7 +155,7 @@ impl UccLib {
                 &mut lib,
             )
         };
-        check_status(status)?;
+        check_status(UccStatus::from_raw(status))?;
         // config is dropped here, releasing the config handle
         Ok(Self {
             inner: std::rc::Rc::new(UccLibInner {
@@ -191,7 +191,7 @@ impl UccLib {
             // Safety: handle was validated non-null and is a valid lib handle.
             ucc_finalize(handle)
         };
-        check_status(status)?;
+        check_status(UccStatus::from_raw(status))?;
         inner.finalized.set(true);
         Ok(())
     }
@@ -222,7 +222,7 @@ impl UccLib {
             // Safety: self.inner.handle is a valid lib handle and &mut attr is a valid pointer.
             ucc_lib_get_attr(self.inner.handle, &mut attr)
         };
-        check_status(status)?;
+        check_status(UccStatus::from_raw(status))?;
         Ok(UccLibAttrs(attr))
     }
 }

@@ -34,7 +34,7 @@ impl UccContextConfig {
             // accepts NULL for the parent config argument and only writes to &mut config.
             ucc_context_config_read(lib.handle(), std::ptr::null(), &mut config)
         };
-        check_status(status)?;
+        check_status(UccStatus::from_raw(status))?;
         Ok(Self { handle: config })
     }
 
@@ -80,7 +80,7 @@ impl UccContextConfig {
                 c_value.as_ptr(),
             )
         };
-        check_status(status)
+        check_status(UccStatus::from_raw(status))
     }
 
     /// Get the raw config handle.
@@ -152,7 +152,7 @@ impl UccContext {
             // reference; &mut context is a valid output pointer.
             ucc_context_create(lib_handle, &ctx_params.0, config.handle(), &mut context)
         };
-        check_status(status)?;
+        check_status(UccStatus::from_raw(status))?;
         if context.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -196,7 +196,7 @@ impl UccContext {
             // Safety: self.inner.handle is a valid context handle and &mut attr is a valid pointer.
             ucc_context_get_attr(self.inner.handle, &mut attr)
         };
-        check_status(status)?;
+        check_status(UccStatus::from_raw(status))?;
         Ok(UccContextAttrs(attr))
     }
 
