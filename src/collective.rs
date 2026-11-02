@@ -21,6 +21,7 @@ use crate::bindings::{
     ucc_reduction_op_t_UCC_OP_PROD, ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t,
     ucc_status_t_UCC_INPROGRESS, ucc_status_t_UCC_OK, ucc_status_t_UCC_OPERATION_INITIALIZED,
 };
+
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
 use std::mem;
@@ -224,7 +225,6 @@ impl<'a> UccCollectiveRequest<'a> {
     pub fn test(&self) -> Result<bool, UccStatus> {
         let status = unsafe {
             // Safety: self.request is a valid handle from ucc_collective_init_and_post.
-            // ucc_collective_test is just `return request->status;`
             (*self.request).status
         };
         match status {
@@ -659,7 +659,6 @@ impl<'a> UccCollective<'a> {
     pub fn test(&self) -> Result<bool, UccStatus> {
         let status = unsafe {
             // SAFETY: self.request is a valid handle from ucc_collective_init_and_post.
-            // ucc_collective_test is just `return request->status;`
             (*self.request).status
         };
         match status {
