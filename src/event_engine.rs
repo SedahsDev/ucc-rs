@@ -10,6 +10,7 @@ use crate::bindings::{
 };
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
+use std::os::raw::c_void;
 
 /// UCC execution engine handle with RAII cleanup.
 ///
@@ -67,7 +68,7 @@ impl UccExecutionEngine {
     }
 
     /// Get a raw handle for use with lower-level APIs.
-    pub fn handle(&self) -> ucc_ee_h {
+    pub(crate) fn handle(&self) -> crate::bindings::ucc_ee_h {
         self.inner.handle
     }
 
@@ -85,7 +86,7 @@ impl UccExecutionEngine {
     ///
     /// The event pointer must be valid and was obtained from the execution engine
     /// or created by the user. The event is consumed by this call.
-    pub unsafe fn set_event_raw(
+    pub(crate) unsafe fn set_event_raw(
         &self,
         event: *mut crate::bindings::ucc_ev_t,
     ) -> Result<(), UccStatus> {
@@ -110,7 +111,7 @@ impl UccExecutionEngine {
     ///
     /// # Safety
     /// `event` must be a valid event pointer owned by this execution engine.
-    pub unsafe fn ack_event_raw(
+    pub(crate) unsafe fn ack_event_raw(
         &self,
         event: *mut crate::bindings::ucc_ev_t,
     ) -> Result<(), UccStatus> {
@@ -181,7 +182,7 @@ impl Drop for UccExecutionEngine {
     }
 }
 
-/// An event pointer returned by the execution engine.
+/// An opaque wrapper around an event pointer returned by the execution engine.
 ///
 /// The storage is owned by UCC and remains valid until the event is
 /// acknowledged. Dropping this wrapper does not acknowledge or free it.
@@ -195,13 +196,24 @@ impl UccEvent {
     /// # Safety
     /// The pointer is only valid while this event is alive and, for borrowed
     /// events, until UCC releases it after acknowledgement.
-    pub fn as_ptr(&self) -> *mut crate::bindings::ucc_ev_t {
+    pub(crate) fn as_ptr(&self) -> *mut crate::bindings::ucc_ev_t {
         self.ptr
     }
 }
 
 impl Drop for UccEvent {
     fn drop(&mut self) {}
+}
+
+/// An execution engine type identifier, independent of the generated bindings.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UccEeType(crate::bindings::ucc_ee_type_t);
+
+impl UccEeType {
+    /// Wrap a raw UCC execution engine type identifier.
+    pub const fn from_raw(ee_type: u32) -> Self {
+        Self(ee_type as _)
+    }
 }
 
 /// Parameters for UCC execution engine creation.
@@ -222,13 +234,17 @@ impl Default for UccExecutionEngineParams {
 }
 
 impl UccExecutionEngineParams {
-    /// Get mutable access to the underlying FFI struct for advanced configuration.
-    ///
-    /// # Safety
-    /// Directly modifying FFI fields bypasses mask management. Ensure any field
-    /// you set also has its corresponding bit set in `self.0.mask`.
-    pub fn inner_mut(&mut self) -> &mut ucc_ee_params {
-        &mut self.0
+    /// Set the execution engine type.
+    pub fn with_type(&mut self, ee_type: UccEeType) -> &mut Self {
+        self.0.ee_type = ee_type.0;
+        self
+    }
+
+    /// Set the execution engine context and its size.
+    pub fn with_context(&mut self, ctx: *mut c_void, size: usize) -> &mut Self {
+        self.0.ee_context = ctx;
+        self.0.ee_context_size = size;
+        self
     }
 }
 

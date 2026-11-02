@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Breaking Changes
+- Wrap event_engine FFI types: `UccExecutionEngine::handle()` is now `pub(crate)`; `UccExecutionEngineParams::inner_mut()` removed with typed setters (`with_type`, `with_context`); `UccEvent` is opaque, no longer exposes `ucc_ev_t` in public signatures (#32)
 - Wrap lib_init FFI types in native Rust wrappers: `UccThreadMode`/`UccSyncType` enums replace `ucc_thread_mode_t`/`ucc_coll_sync_type_t` in public signatures; `UccLibParams::inner_mut()` removed (typed setters instead); `UccLibAttrs` getters return native types (#30)
 - `UccCollectiveRequest` now requires a lifetime parameter `'a` tied to the buffer borrow. All convenience methods on `UccTeam` (`allreduce`, `bcast`, `allgather`, etc.) now return `UccCollectiveRequest<'a>`.
 - `UccCollective` also now has a lifetime parameter `'a`.
@@ -20,6 +21,11 @@
 - Fix CollectiveBuilder allgather truncation: add with_dst_count() to express asymmetric src/dst counts
 - fix(#17): correct UCC status classification in collective `test()` and the status helpers (`UCC_INPROGRESS`/`UCC_OPERATION_INITIALIZED` = in progress, negative = error, `UCC_ERR_NO_MESSAGE` no longer special-cased) and finalize completed-or-errored requests on drop instead of leaking them
 - Migration: Replace `ucc_thread_mode_t_UCC_THREAD_SINGLE` with `UccThreadMode::Single`, `ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES` with `UccSyncType::Collectives`
+
+### Migration
+- Replace `params.inner_mut().ee_type = ...` with `params.with_type(...)`
+- Replace `params.inner_mut().ee_context = ...` with `params.with_context(ptr, size)`
+- Raw execution engine handle access via `handle()` is now internal; use EE methods directly
 
 ## 0.1.0
 
