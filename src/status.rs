@@ -30,8 +30,6 @@
 //! assert!(matches!(UccStatus::from_raw(-999), UccStatus::Unknown(_)));
 //! ```
 
-use crate::bindings::ucc_status_t;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Status helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,19 +38,20 @@ use crate::bindings::ucc_status_t;
 ///
 /// This returns `true` for both `UCC_INPROGRESS` (-1) and `UCC_ERR_NO_MESSAGE` (-39),
 /// as both are treated as in-progress for collective operations.
-pub fn is_status_in_progress(status: ucc_status_t) -> bool {
-    status == -1 || status == -39
+pub fn is_status_in_progress(status: i32) -> bool {
+    matches!(status, -1 | -39)
 }
 
 /// Returns `true` if the status indicates successful completion.
-pub fn is_status_ok(status: ucc_status_t) -> bool {
-    status == 0
+pub fn is_status_ok(status: i32) -> bool {
+    let s = UccStatus::from_raw(status);
+    s.is_ok()
 }
 
 /// Returns `true` if the status indicates an error.
 ///
 /// This returns `true` for all negative values except `UCC_ERR_NO_MESSAGE` (-39).
-pub fn is_status_error(status: ucc_status_t) -> bool {
+pub fn is_status_error(status: i32) -> bool {
     status < 0 && status != -39
 }
 
@@ -287,23 +286,16 @@ impl From<UccError> for UccStatus {
     }
 }
 
-impl From<ucc_status_t> for UccStatus {
-    fn from(raw: ucc_status_t) -> Self {
-        Self::from_raw(raw)
-    }
-}
-
 /// Check a UCC status code and return an error if it's not OK.
 ///
 /// Returns `Ok(())` for `UCC_OK` and `Err(UccStatus)` for anything else
 /// (including `UCC_INPROGRESS` and error codes).
 #[must_use = "Status checks should not be ignored"]
-pub fn check_status(status: ucc_status_t) -> Result<(), UccStatus> {
-    let ucc_status = UccStatus::from_raw(status);
-    if ucc_status.is_ok() {
+pub fn check_status(status: UccStatus) -> Result<(), UccStatus> {
+    if status.is_ok() {
         Ok(())
     } else {
-        Err(ucc_status)
+        Err(status)
     }
 }
 
@@ -457,18 +449,18 @@ mod tests {
 
     #[test]
     fn test_check_status_ok() {
-        assert!(check_status(0).is_ok());
+        assert!(check_status(UccStatus::from_raw(0)).is_ok());
     }
 
     #[test]
     fn test_check_status_error() {
-        let err = check_status(-1).unwrap_err();
+        let err = check_status(UccStatus::from_raw(-1)).unwrap_err();
         assert_eq!(err, UccStatus::Known(UccError::ErrNotSupported));
     }
 
     #[test]
     fn test_check_status_inprogress() {
-        let err = check_status(1).unwrap_err();
+        let err = check_status(UccStatus::from_raw(1)).unwrap_err();
         assert_eq!(err, UccStatus::Known(UccError::InProgress));
     }
 

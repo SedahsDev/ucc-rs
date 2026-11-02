@@ -56,7 +56,7 @@ impl UccExecutionEngine {
             // ucc_ee_create takes (team, params, ee) — team-based, not context-based.
             ucc_ee_create(team.handle(), &ee_params.0, &mut ee)
         };
-        check_status(status)?;
+        check_status(UccStatus::from_raw(status))?;
         if ee.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -90,7 +90,7 @@ impl UccExecutionEngine {
         event: *mut crate::bindings::ucc_ev_t,
     ) -> Result<(), UccStatus> {
         let status = ucc_ee_set_event(self.handle(), event);
-        check_status(status)
+        check_status(UccStatus::from_raw(status))
     }
 
     /// Acknowledge an event from the execution engine.
@@ -115,7 +115,7 @@ impl UccExecutionEngine {
         event: *mut crate::bindings::ucc_ev_t,
     ) -> Result<(), UccStatus> {
         let status = ucc_ee_ack_event(self.handle(), event);
-        check_status(status)
+        check_status(UccStatus::from_raw(status))
     }
 
     /// Block until an event is available on the execution engine.
@@ -163,7 +163,8 @@ impl UccExecutionEngine {
                 Ok(None)
             }
             ucc_status_t_UCC_ERR_NO_RESOURCE => Ok(None),
-            status => Err(check_status(status).expect_err("non-OK status must be an error")),
+            status => Err(check_status(UccStatus::from_raw(status))
+                .expect_err("non-OK status must be an error")),
         }
     }
 }
