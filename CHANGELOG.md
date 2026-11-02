@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Breaking Changes
+- Wrap lib_init FFI types in native Rust wrappers: `UccThreadMode`/`UccSyncType` enums replace `ucc_thread_mode_t`/`ucc_coll_sync_type_t` in public signatures; `UccLibParams::inner_mut()` removed (typed setters instead); `UccLibAttrs` getters return native types (#30)
 - `UccCollectiveRequest` now requires a lifetime parameter `'a` tied to the buffer borrow. All convenience methods on `UccTeam` (`allreduce`, `bcast`, `allgather`, etc.) now return `UccCollectiveRequest<'a>`.
 - `UccCollective` also now has a lifetime parameter `'a`.
 - `CollectiveBuilder::init` and `CollectiveBuilder::init_and_post` now return `Result<UccCollective<'a>, UccStatus>`.
@@ -18,6 +19,7 @@
 - Fix `UccTeam::drop` to re-drive `ucc_team_destroy` on `UCC_INPROGRESS`; add fallible `UccTeam::destroy()` for explicit teardown
 - Fix CollectiveBuilder allgather truncation: add with_dst_count() to express asymmetric src/dst counts
 - fix(#17): correct UCC status classification in collective `test()` and the status helpers (`UCC_INPROGRESS`/`UCC_OPERATION_INITIALIZED` = in progress, negative = error, `UCC_ERR_NO_MESSAGE` no longer special-cased) and finalize completed-or-errored requests on drop instead of leaking them
+- Migration: Replace `ucc_thread_mode_t_UCC_THREAD_SINGLE` with `UccThreadMode::Single`, `ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES` with `UccSyncType::Collectives`
 
 ## 0.1.0
 

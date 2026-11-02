@@ -2,6 +2,8 @@
 
 Safe Rust bindings for [UCC](https://github.com/openucx/ucc) (Unified Collective Communication).
 
+This crate supports UCC version 1.9.0. The committed bindings were generated from `wrapper.h` includes for this version.
+
 ## Features
 
 - RAII handles: `UccLib`, `UccContext`, `UccTeam`, collectives, memory map

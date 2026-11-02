@@ -5,17 +5,84 @@
 //! be created via `ucc_lib_config_read` before `ucc_init_version`.
 
 use crate::bindings::{
-    ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_finalize, ucc_get_version,
-    ucc_get_version_string, ucc_init_version, ucc_lib_config_h, ucc_lib_config_modify,
-    ucc_lib_config_print, ucc_lib_config_read, ucc_lib_config_release, ucc_lib_get_attr, ucc_lib_h,
-    ucc_lib_params, ucc_lib_params_field_UCC_LIB_PARAM_FIELD_COLL_TYPES,
+    ucc_finalize, ucc_get_version, ucc_get_version_string, ucc_init_version, ucc_lib_config_h,
+    ucc_lib_config_modify, ucc_lib_config_print, ucc_lib_config_read, ucc_lib_config_release,
+    ucc_lib_get_attr, ucc_lib_h, ucc_lib_params,
+    ucc_lib_params_field_UCC_LIB_PARAM_FIELD_COLL_TYPES,
     ucc_lib_params_field_UCC_LIB_PARAM_FIELD_REDUCTION_TYPES,
     ucc_lib_params_field_UCC_LIB_PARAM_FIELD_SYNC_TYPE,
     ucc_lib_params_field_UCC_LIB_PARAM_FIELD_THREAD_MODE,
-    ucc_status_string as ucc_status_string_raw, ucc_thread_mode_t,
-    ucc_thread_mode_t_UCC_THREAD_SINGLE, UCC_API_MAJOR, UCC_API_MINOR,
+    ucc_status_string as ucc_status_string_raw, UCC_API_MAJOR, UCC_API_MINOR,
 };
 use crate::status::{check_status, UccStatus};
+
+/// Thread mode for UCC library initialization.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UccThreadMode {
+    Single = 0,
+    Multi = 1,
+}
+
+impl From<crate::bindings::ucc_thread_mode_t> for UccThreadMode {
+    fn from(value: crate::bindings::ucc_thread_mode_t) -> Self {
+        match value {
+            crate::bindings::ucc_thread_mode_t_UCC_THREAD_SINGLE => Self::Single,
+            crate::bindings::ucc_thread_mode_t_UCC_THREAD_MULTIPLE => Self::Multi,
+            _ => Self::Single,
+        }
+    }
+}
+
+impl From<UccThreadMode> for crate::bindings::ucc_thread_mode_t {
+    fn from(value: UccThreadMode) -> crate::bindings::ucc_thread_mode_t {
+        match value {
+            UccThreadMode::Single => crate::bindings::ucc_thread_mode_t_UCC_THREAD_SINGLE,
+            UccThreadMode::Multi => crate::bindings::ucc_thread_mode_t_UCC_THREAD_MULTIPLE,
+        }
+    }
+}
+
+impl std::fmt::Display for UccThreadMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UccThreadMode::Single => write!(f, "Single"),
+            UccThreadMode::Multi => write!(f, "Multi"),
+        }
+    }
+}
+
+/// Collective synchronization type for UCC library initialization.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UccSyncType {
+    Collectives = 0,
+}
+
+impl From<crate::bindings::ucc_coll_sync_type_t> for UccSyncType {
+    fn from(value: crate::bindings::ucc_coll_sync_type_t) -> Self {
+        match value {
+            crate::bindings::ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES => Self::Collectives,
+            _ => Self::Collectives,
+        }
+    }
+}
+
+impl From<UccSyncType> for crate::bindings::ucc_coll_sync_type_t {
+    fn from(value: UccSyncType) -> crate::bindings::ucc_coll_sync_type_t {
+        match value {
+            UccSyncType::Collectives => crate::bindings::ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
+        }
+    }
+}
+
+impl std::fmt::Display for UccSyncType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UccSyncType::Collectives => write!(f, "Collectives"),
+        }
+    }
+}
 
 /// UCC library config handle with RAII cleanup.
 ///
@@ -266,8 +333,8 @@ impl Default for UccLibParams {
         // Safety: ucc_lib_params is a POD struct with no pointers or discriminants
         // that the C API only reads fields indicated by the mask.
         let mut params: ucc_lib_params = unsafe { std::mem::zeroed() };
-        params.thread_mode = ucc_thread_mode_t_UCC_THREAD_SINGLE;
-        params.sync_type = ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES;
+        params.thread_mode = UccThreadMode::Single.into();
+        params.sync_type = UccSyncType::Collectives.into();
         params.mask = ucc_lib_params_field_UCC_LIB_PARAM_FIELD_THREAD_MODE as u64
             | ucc_lib_params_field_UCC_LIB_PARAM_FIELD_COLL_TYPES as u64
             | ucc_lib_params_field_UCC_LIB_PARAM_FIELD_SYNC_TYPE as u64
@@ -281,14 +348,14 @@ impl Default for UccLibParams {
 
 impl UccLibParams {
     /// Set the thread mode.
-    pub fn with_thread_mode(&mut self, mode: ucc_thread_mode_t) {
-        self.0.thread_mode = mode;
+    pub fn with_thread_mode(&mut self, mode: UccThreadMode) {
+        self.0.thread_mode = mode.into();
         self.0.mask |= crate::bindings::ucc_lib_params_field_UCC_LIB_PARAM_FIELD_THREAD_MODE as u64;
     }
 
     /// Set the collective sync type.
-    pub fn with_sync_type(&mut self, sync_type: ucc_coll_sync_type_t) {
-        self.0.sync_type = sync_type;
+    pub fn with_sync_type(&mut self, sync_type: UccSyncType) {
+        self.0.sync_type = sync_type.into();
         self.0.mask |= crate::bindings::ucc_lib_params_field_UCC_LIB_PARAM_FIELD_SYNC_TYPE as u64;
     }
 
@@ -303,11 +370,6 @@ impl UccLibParams {
         self.0.reduction_types = reduction_types;
         self.0.mask |=
             crate::bindings::ucc_lib_params_field_UCC_LIB_PARAM_FIELD_REDUCTION_TYPES as u64;
-    }
-
-    /// Access the inner params for advanced configuration.
-    pub fn inner_mut(&mut self) -> &mut ucc_lib_params {
-        &mut self.0
     }
 }
 
@@ -345,8 +407,8 @@ pub struct UccLibAttrs(crate::bindings::ucc_lib_attr_t);
 
 impl UccLibAttrs {
     /// Get the thread mode supported by the library.
-    pub fn thread_mode(&self) -> ucc_thread_mode_t {
-        self.0.thread_mode
+    pub fn thread_mode(&self) -> UccThreadMode {
+        self.0.thread_mode.into()
     }
 
     /// Get the bitmask of supported collective types.
@@ -360,8 +422,8 @@ impl UccLibAttrs {
     }
 
     /// Get the collective sync type.
-    pub fn sync_type(&self) -> ucc_coll_sync_type_t {
-        self.0.sync_type
+    pub fn sync_type(&self) -> UccSyncType {
+        self.0.sync_type.into()
     }
 
     /// Get the raw mask indicating which fields are valid.
@@ -447,11 +509,8 @@ mod tests {
     #[test]
     fn test_ucc_lib_params_default() {
         let params = UccLibParams::default();
-        assert_eq!(params.0.thread_mode, ucc_thread_mode_t_UCC_THREAD_SINGLE);
-        assert_eq!(
-            params.0.sync_type,
-            ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES
-        );
+        assert_eq!(params.0.thread_mode, UccThreadMode::Single.into());
+        assert_eq!(params.0.sync_type, UccSyncType::Collectives.into());
         assert_eq!(params.0.coll_types, u64::MAX);
         assert_eq!(params.0.reduction_types, u64::MAX);
     }
@@ -459,14 +518,14 @@ mod tests {
     #[test]
     fn test_ucc_lib_params_with_thread_mode() {
         let mut params = UccLibParams::default();
-        params.with_thread_mode(ucc_thread_mode_t_UCC_THREAD_SINGLE);
+        params.with_thread_mode(UccThreadMode::Single);
         assert!(params.0.mask & ucc_lib_params_field_UCC_LIB_PARAM_FIELD_THREAD_MODE as u64 != 0);
     }
 
     #[test]
     fn test_ucc_lib_params_with_sync_type() {
         let mut params = UccLibParams::default();
-        params.with_sync_type(ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES);
+        params.with_sync_type(UccSyncType::Collectives);
         assert!(params.0.mask & ucc_lib_params_field_UCC_LIB_PARAM_FIELD_SYNC_TYPE as u64 != 0);
     }
 
@@ -588,7 +647,7 @@ mod tests {
                 .expect("get_attr(THREAD_MODE) should succeed");
             assert_eq!(
                 attrs.thread_mode(),
-                ucc_thread_mode_t_UCC_THREAD_SINGLE,
+                UccThreadMode::Single,
                 "Default thread mode should be SINGLE"
             );
         }
@@ -629,7 +688,7 @@ mod tests {
                 .expect("get_attr(SYNC_TYPE) should succeed");
             assert_eq!(
                 attrs.sync_type(),
-                ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
+                UccSyncType::Collectives,
                 "Default sync type should be COLLECTIVES"
             );
         }

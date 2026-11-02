@@ -4,14 +4,14 @@
 //! It wraps the underlying UCX context for the `tl/ucp` transport.
 
 use crate::bindings::{
-    ucc_coll_sync_type_t, ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_config_h,
-    ucc_context_config_modify, ucc_context_config_print, ucc_context_config_read,
-    ucc_context_config_release, ucc_context_create, ucc_context_destroy, ucc_context_get_attr,
-    ucc_context_h, ucc_context_params, ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE,
+    ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_config_h, ucc_context_config_modify,
+    ucc_context_config_print, ucc_context_config_read, ucc_context_config_release,
+    ucc_context_create, ucc_context_destroy, ucc_context_get_attr, ucc_context_h,
+    ucc_context_params, ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE, ucc_context_progress,
     ucc_context_type_t, ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
 };
-use crate::lib_init::UccLib;
+use crate::lib_init::{UccLib, UccSyncType};
 use crate::status::{check_status, UccError, UccStatus};
 
 /// UCC context config handle with RAII cleanup.
@@ -243,8 +243,8 @@ impl UccContextAttrs {
     }
 
     /// Get the collective sync type.
-    pub fn sync_type(&self) -> ucc_coll_sync_type_t {
-        self.0.sync_type
+    pub fn sync_type(&self) -> UccSyncType {
+        self.0.sync_type.into()
     }
 
     /// Get the context address (for OOB discovery).
@@ -335,8 +335,8 @@ impl UccContextParams {
     }
 
     /// Set the collective sync type.
-    pub fn with_sync_type(&mut self, sync_type: ucc_coll_sync_type_t) {
-        self.0.sync_type = sync_type;
+    pub fn with_sync_type(&mut self, sync_type: UccSyncType) {
+        self.0.sync_type = sync_type.into();
         self.0.mask |=
             crate::bindings::ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE as u64;
     }
@@ -378,6 +378,7 @@ mod tests {
             params.0.sync_type,
             ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES
         );
+        let _sync: UccSyncType = params.0.sync_type.into();
     }
 
     #[test]
@@ -454,7 +455,7 @@ mod tests {
                 .expect("get_attr(SYNC_TYPE) should succeed");
             assert_eq!(
                 attrs.sync_type(),
-                ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES,
+                UccSyncType::Collectives,
                 "Default sync type should be COLLECTIVES"
             );
         }
