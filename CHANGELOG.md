@@ -15,6 +15,9 @@
 ### Features
 - `UccLib::finalize(&mut self) -> Result<(), UccStatus>`: explicit, fallible teardown of the library handle (#25). Rejected with an error while other `UccLib` clones exist or after a prior finalize; `Drop` still auto-finalizes when `finalize()` was not called.
 
+### Tests
+- Add edge-case tests for allgather_counts: `allgather_counts_zero_send_elems` and `allgather_counts_single_rank` (#49)
+
 ### Fixes
 - `UccTeam::drop` now properly handles `UCC_INPROGRESS` from `ucc_team_destroy` by looping with context progress.
 - Add safe status helpers (raw_status, is_complete, is_in_progress, check) to UccCollective and UccCollectiveRequest; mark request() as pub(crate)
