@@ -701,47 +701,6 @@ impl<'a> Drop for UccCollective<'a> {
     }
 }
 
-/// Execute a barrier on the given team.
-///
-/// A barrier is a synchronization point — all ranks in the team must
-/// call it before any can proceed. No data is transferred.
-pub fn barrier(team: &UccTeam) -> Result<UccCollectiveRequest<'static>, UccStatus> {
-    // SAFETY: UCC does not dereference buffer pointers when counts are zero.
-    // Any non-null pointer is acceptable; we use 1 as a simple non-null address.
-    let buf_ptr = std::ptr::dangling_mut::<std::os::raw::c_void>();
-    // SAFETY: ucc_coll_args is a POD struct; we initialize all fields explicitly.
-    let mut args: ucc_coll_args = unsafe { std::mem::zeroed() };
-    args.coll_type = UccCollectiveType::Barrier.as_raw();
-    args.src.info.buffer = buf_ptr;
-    args.dst.info.buffer = buf_ptr;
-    args.src.info.count = 0;
-    args.dst.info.count = 0;
-    args.src.info.datatype = DataType::Uint8.as_raw();
-    args.dst.info.datatype = DataType::Uint8.as_raw();
-    args.src.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
-    args.dst.info.mem_type = ucc_memory_type_UCC_MEMORY_TYPE_HOST;
-    args.op = ucc_reduction_op_t_UCC_OP_SUM;
-    args.root = 0;
-    args.tag = 0;
-    args.flags = 0;
-    args.error_type = ucc_error_type_t_UCC_ERR_TYPE_LOCAL;
-    args.cb = ucc_coll_callback {
-        cb: None,
-        data: std::ptr::null_mut(),
-    };
-    args.timeout = 0.0;
-    let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
-    let status = unsafe {
-        // SAFETY: args is fully initialized POD; team handle is valid.
-        ucc_collective_init_and_post(&mut args, &mut coll_req, team.handle())
-    };
-    check_status(UccStatus::from_raw(status))?;
-    if coll_req.is_null() {
-        return Err(UccStatus::Known(UccError::ErrNoResource));
-    }
-    Ok(UccCollectiveRequest::new(coll_req))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
