@@ -22,8 +22,17 @@ use crate::bindings::{
     ucc_status_t_UCC_INPROGRESS, ucc_status_t_UCC_OK, ucc_status_t_UCC_OPERATION_INITIALIZED,
 };
 
-extern "C" {
-    fn ucc_collective_test(request: ucc_coll_req_h) -> ucc_status_t;
+/// `ucc_collective_test` is a `static inline` function in the UCC 1.9 header
+/// (`ucc/api/ucc.h`: `return request->status;`), so it is not an exported
+/// library symbol and cannot be declared `extern "C"`. Reproduce its exact
+/// semantics here; every call-site goes through this single wrapper, so if a
+/// future UCC makes `ucc_coll_req_t` truly opaque, only this body changes.
+///
+/// # Safety
+/// `request` must be a valid `ucc_coll_req_h` (non-null, not finalized).
+#[inline]
+unsafe fn ucc_collective_test(request: ucc_coll_req_h) -> ucc_status_t {
+    (*request).status
 }
 
 use crate::status::{check_status, UccError, UccStatus};
@@ -223,7 +232,8 @@ impl<'a> UccCollectiveRequest<'a> {
     /// Returns `Ok(true)` if the operation is complete, `Ok(false)` if
     /// still in progress, or `Err` if the operation failed.
     ///
-    /// Calls the C `ucc_collective_test()` function to poll the request.
+    /// Polls the request via the `ucc_collective_test()` wrapper (a
+    /// `static inline` accessor in the UCC header, reproduced in this module).
     #[allow(non_upper_case_globals)]
     pub fn test(&self) -> Result<bool, UccStatus> {
         let status = unsafe {
@@ -659,7 +669,8 @@ impl<'a> UccCollective<'a> {
 
     /// Test whether this collective has completed and track completion for drop.
     ///
-    /// Calls the C `ucc_collective_test()` function to poll the request.
+    /// Polls the request via the `ucc_collective_test()` wrapper (a
+    /// `static inline` accessor in the UCC header, reproduced in this module).
     #[allow(non_upper_case_globals)]
     pub fn test(&self) -> Result<bool, UccStatus> {
         let status = unsafe {
