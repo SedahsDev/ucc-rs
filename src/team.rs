@@ -419,9 +419,9 @@ impl UccTeam {
             ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
         };
 
-        /* UCC requires a non-null buffer pointer even for zero-count barrier
-         * operations; a dangling pointer is safe because UCC never dereferences
-         * the buffer when counts are zero. */
+        // UCC requires a non-null buffer pointer even for zero-count barrier
+        // operations; a dangling pointer is safe because UCC never
+        // dereferences the buffer when counts are zero.
         let buf_ptr = std::ptr::NonNull::<u8>::dangling().as_ptr() as *mut std::os::raw::c_void;
 
         // Safety: ucc_coll_args is a POD struct; we initialize all fields explicitly.
