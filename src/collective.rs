@@ -617,14 +617,15 @@ impl<'a> UccCollective<'a> {
     ///
     /// # Safety
     ///
-    /// The event pointer must be valid and obtained from the execution engine
-    /// (e.g., via `UccExecutionEngine::wait_event()`).
+    /// The `ee` and `event` must be valid and obtained from the execution engine
+    /// (e.g., via `UccExecutionEngine::wait_event()`). The event must remain
+    /// valid for the duration of the triggered post call.
     pub unsafe fn triggered_post(
         &self,
-        ee_handle: crate::bindings::ucc_ee_h,
-        event: *mut crate::bindings::ucc_ev_t,
+        ee: &crate::event_engine::UccExecutionEngine,
+        event: &crate::event_engine::UccEvent,
     ) -> Result<(), UccStatus> {
-        let status = ucc_collective_triggered_post(ee_handle, event);
+        let status = ucc_collective_triggered_post(ee.as_raw(), event.as_raw());
         check_status(UccStatus::from_raw(status))
     }
 
