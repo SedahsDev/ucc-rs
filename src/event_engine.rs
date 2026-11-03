@@ -10,6 +10,7 @@ use crate::bindings::{
 };
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
+use std::os::raw::c_void;
 
 /// Native wrapper for UCC event type (ucc_ev_t).
 ///
@@ -236,6 +237,43 @@ impl Drop for UccEvent {
     fn drop(&mut self) {}
 }
 
+/// Execution engine type, independent of the generated bindings.
+///
+/// Mirrors `ucc_ee_type_t` so that raw bindgen constants never appear in
+/// public signatures. Follows the same shape as the other native enums in
+/// this crate ([`crate::UccThreadMode`], [`crate::UccSyncType`]).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum UccEeType {
+    /// CUDA stream based execution engine (`UCC_EE_CUDA_STREAM`).
+    CudaStream = 0,
+    /// CPU thread based execution engine (`UCC_EE_CPU_THREAD`).
+    #[default]
+    CpuThread = 1,
+    /// ROCm stream based execution engine (`UCC_EE_ROCM_STREAM`).
+    RocmStream = 2,
+}
+
+impl From<crate::bindings::ucc_ee_type_t> for UccEeType {
+    fn from(value: crate::bindings::ucc_ee_type_t) -> Self {
+        match value {
+            crate::bindings::ucc_ee_type_UCC_EE_CUDA_STREAM => Self::CudaStream,
+            crate::bindings::ucc_ee_type_UCC_EE_CPU_THREAD => Self::CpuThread,
+            crate::bindings::ucc_ee_type_UCC_EE_ROCM_STREAM => Self::RocmStream,
+            _ => Self::CpuThread,
+        }
+    }
+}
+
+impl From<UccEeType> for crate::bindings::ucc_ee_type_t {
+    fn from(value: UccEeType) -> crate::bindings::ucc_ee_type_t {
+        match value {
+            UccEeType::CudaStream => crate::bindings::ucc_ee_type_UCC_EE_CUDA_STREAM,
+            UccEeType::CpuThread => crate::bindings::ucc_ee_type_UCC_EE_CPU_THREAD,
+            UccEeType::RocmStream => crate::bindings::ucc_ee_type_UCC_EE_ROCM_STREAM,
+        }
+    }
+}
+
 /// Parameters for UCC execution engine creation.
 ///
 /// Wraps `ucc_ee_params` and manages the field mask automatically.
@@ -254,13 +292,17 @@ impl Default for UccExecutionEngineParams {
 }
 
 impl UccExecutionEngineParams {
-    /// Get mutable access to the underlying FFI struct for advanced configuration.
-    ///
-    /// # Safety
-    /// Directly modifying FFI fields bypasses mask management. Ensure any field
-    /// you set also has its corresponding bit set in `self.0.mask`.
-    pub fn inner_mut(&mut self) -> &mut ucc_ee_params {
-        &mut self.0
+    /// Set the execution engine type.
+    pub fn with_type(&mut self, ee_type: UccEeType) -> &mut Self {
+        self.0.ee_type = ee_type.into();
+        self
+    }
+
+    /// Set the execution engine context and its size.
+    pub fn with_context(&mut self, ctx: *mut c_void, size: usize) -> &mut Self {
+        self.0.ee_context = ctx;
+        self.0.ee_context_size = size;
+        self
     }
 }
 
@@ -274,6 +316,46 @@ mod tests {
     fn test_ucc_ee_params_default() {
         let _params = UccExecutionEngineParams::default();
         // Just verify it compiles and doesn't panic
+    }
+
+    #[test]
+    fn test_ucc_ee_params_typed_setters() {
+        let ctx = [0u8; 8];
+        let mut params = UccExecutionEngineParams::default();
+        params
+            .with_type(UccEeType::CpuThread)
+            .with_context(ctx.as_ptr() as *mut c_void, ctx.len());
+        assert_eq!(
+            params.0.ee_type,
+            crate::bindings::ucc_ee_type_UCC_EE_CPU_THREAD
+        );
+        assert_eq!(params.0.ee_context_size, 8);
+        assert!(!params.0.ee_context.is_null());
+    }
+
+    #[test]
+    fn test_ucc_ee_type_roundtrip() {
+        let cases = [
+            (
+                UccEeType::CudaStream,
+                crate::bindings::ucc_ee_type_UCC_EE_CUDA_STREAM,
+            ),
+            (
+                UccEeType::CpuThread,
+                crate::bindings::ucc_ee_type_UCC_EE_CPU_THREAD,
+            ),
+            (
+                UccEeType::RocmStream,
+                crate::bindings::ucc_ee_type_UCC_EE_ROCM_STREAM,
+            ),
+        ];
+        for (native, raw) in cases {
+            let converted: crate::bindings::ucc_ee_type_t = native.into();
+            assert_eq!(converted, raw);
+            assert_eq!(UccEeType::from(raw), native);
+        }
+        // Unknown values fall back to the CPU-thread engine.
+        assert_eq!(UccEeType::from(0xFFFF_0000), UccEeType::CpuThread);
     }
 
     #[test]

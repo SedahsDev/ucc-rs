@@ -330,6 +330,9 @@ impl UccTeam {
     /// * `datatype` — Element data type (e.g., `DataType::Uchar`).
     /// * `op` — Reduction operation (e.g., `ReductionOp::Sum`).
     ///
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -419,9 +422,9 @@ impl UccTeam {
             ucc_error_type_t_UCC_ERR_TYPE_LOCAL, ucc_memory_type_UCC_MEMORY_TYPE_HOST,
         };
 
-        // UCC does not dereference barrier buffers when their counts are zero.
-        // Keep the pointer non-null for implementations that reject NULL, while
-        // avoiding a pointer to a stack allocation that outlives this function.
+        // UCC requires a non-null buffer pointer even for zero-count barrier
+        // operations; a dangling pointer is safe because UCC never
+        // dereferences the buffer when counts are zero.
         let buf_ptr = std::ptr::NonNull::<u8>::dangling().as_ptr() as *mut std::os::raw::c_void;
 
         // Safety: ucc_coll_args is a POD struct; we initialize all fields explicitly.
@@ -472,6 +475,9 @@ impl UccTeam {
     /// * `sendbuf` — Send buffer containing this rank's contribution.
     /// * `recvbuf` — Receive buffer that will hold all ranks' contributions.
     /// * `datatype` — Element data type (e.g., `DataType::Uchar`).
+    ///
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     ///
     /// # Example
     ///
@@ -564,6 +570,9 @@ impl UccTeam {
     /// * `datatype` — Element data type (e.g., `DataType::Uchar`).
     /// * `root` — Rank of the root process that sends the data.
     ///
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -641,6 +650,9 @@ impl UccTeam {
     /// * `op` — Reduction operation (e.g., `ReductionOp::Sum`).
     /// * `root` — Rank of the root process that receives the result.
     ///
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -710,6 +722,9 @@ impl UccTeam {
     }
 
     /// Non-blocking gather: all ranks send, root receives.
+    ///
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     #[must_use = "Result should be checked"]
     pub fn gather<'a>(
         &'a self,
@@ -759,6 +774,9 @@ impl UccTeam {
     }
 
     /// Non-blocking scatter: root sends, all ranks receive.
+    ///
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     #[must_use = "Result should be checked"]
     pub fn scatter<'a>(
         &'a self,
@@ -808,6 +826,9 @@ impl UccTeam {
     }
 
     /// Non-blocking alltoall.
+    ///
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     #[must_use = "Result should be checked"]
     pub fn alltoall<'a>(
         &'a self,
@@ -855,6 +876,9 @@ impl UccTeam {
     }
 
     /// Non-blocking reduce-scatter.
+    ///
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     #[must_use = "Result should be checked"]
     pub fn reduce_scatter<'a>(
         &'a self,
