@@ -12,6 +12,38 @@ use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
 use std::os::raw::c_void;
 
+/// Native wrapper for UCC event type (ucc_ev_t).
+///
+/// Used for triggered collective operations. This is a newtype wrapper
+/// around the raw FFI type to prevent direct FFI exposure in public APIs.
+///
+/// An event pointer returned by the execution engine.
+///
+/// The storage is owned by UCC and remains valid until the event is
+/// acknowledged. Dropping this wrapper does not acknowledge or free it.
+#[repr(transparent)]
+pub struct UccEvent {
+    pub(crate) inner: *mut crate::bindings::ucc_ev_t,
+}
+
+impl UccEvent {
+    /// Create a new UccEvent from a raw pointer.
+    ///
+    /// # Safety
+    /// `raw` must be a valid pointer to a ucc_ev_t structure.
+    pub(crate) unsafe fn from_raw(raw: *mut crate::bindings::ucc_ev_t) -> Self {
+        Self { inner: raw }
+    }
+
+    /// Get the raw pointer.
+    ///
+    /// # Safety
+    /// The returned pointer must only be used in FFI calls where UCC expects ucc_ev_t.
+    pub(crate) fn as_raw(&self) -> *mut crate::bindings::ucc_ev_t {
+        self.inner
+    }
+}
+
 /// UCC execution engine handle with RAII cleanup.
 ///
 /// An execution engine manages events and allows scheduling collective
@@ -67,9 +99,17 @@ impl UccExecutionEngine {
         })
     }
 
-    /// Get a raw handle for use with lower-level APIs.
-    pub(crate) fn handle(&self) -> crate::bindings::ucc_ee_h {
+    /// Get the raw handle.
+    ///
+    /// # Safety
+    /// The returned handle must only be used in FFI calls where UCC expects ucc_ee_h.
+    pub(crate) fn as_raw(&self) -> crate::bindings::ucc_ee_h {
         self.inner.handle
+    }
+
+    /// Get a raw handle for use with lower-level APIs.
+    pub(crate) fn handle(&self) -> ucc_ee_h {
+        self.as_raw()
     }
 
     /// Set a UCC-owned event.
@@ -158,7 +198,7 @@ impl UccExecutionEngine {
         // The pointed-to event remains owned by UCC until acknowledgement.
         let status = ucc_ee_get_event(self.handle(), &mut event);
         match status {
-            ucc_status_t_UCC_OK if !event.is_null() => Ok(Some(UccEvent { ptr: event })),
+            ucc_status_t_UCC_OK if !event.is_null() => Ok(Some(UccEvent::from_raw(event))),
             ucc_status_t_UCC_OK => {
                 // A successful call with a null event has no event to return.
                 Ok(None)
@@ -182,14 +222,6 @@ impl Drop for UccExecutionEngine {
     }
 }
 
-/// An opaque wrapper around an event pointer returned by the execution engine.
-///
-/// The storage is owned by UCC and remains valid until the event is
-/// acknowledged. Dropping this wrapper does not acknowledge or free it.
-pub struct UccEvent {
-    ptr: *mut crate::bindings::ucc_ev_t,
-}
-
 impl UccEvent {
     /// Return the raw event pointer for APIs such as `triggered_post`.
     ///
@@ -197,7 +229,7 @@ impl UccEvent {
     /// The pointer is only valid while this event is alive and, for borrowed
     /// events, until UCC releases it after acknowledgement.
     pub(crate) fn as_ptr(&self) -> *mut crate::bindings::ucc_ev_t {
-        self.ptr
+        self.as_raw()
     }
 }
 
@@ -205,14 +237,40 @@ impl Drop for UccEvent {
     fn drop(&mut self) {}
 }
 
-/// An execution engine type identifier, independent of the generated bindings.
+/// Execution engine type, independent of the generated bindings.
+///
+/// Mirrors `ucc_ee_type_t` so that raw bindgen constants never appear in
+/// public signatures. Follows the same shape as the other native enums in
+/// this crate ([`crate::UccThreadMode`], [`crate::UccSyncType`]).
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct UccEeType(crate::bindings::ucc_ee_type_t);
+pub enum UccEeType {
+    /// CUDA stream based execution engine (`UCC_EE_CUDA_STREAM`).
+    CudaStream = 0,
+    /// CPU thread based execution engine (`UCC_EE_CPU_THREAD`).
+    #[default]
+    CpuThread = 1,
+    /// ROCm stream based execution engine (`UCC_EE_ROCM_STREAM`).
+    RocmStream = 2,
+}
 
-impl UccEeType {
-    /// Wrap a raw UCC execution engine type identifier.
-    pub const fn from_raw(ee_type: u32) -> Self {
-        Self(ee_type as _)
+impl From<crate::bindings::ucc_ee_type_t> for UccEeType {
+    fn from(value: crate::bindings::ucc_ee_type_t) -> Self {
+        match value {
+            crate::bindings::ucc_ee_type_UCC_EE_CUDA_STREAM => Self::CudaStream,
+            crate::bindings::ucc_ee_type_UCC_EE_CPU_THREAD => Self::CpuThread,
+            crate::bindings::ucc_ee_type_UCC_EE_ROCM_STREAM => Self::RocmStream,
+            _ => Self::CpuThread,
+        }
+    }
+}
+
+impl From<UccEeType> for crate::bindings::ucc_ee_type_t {
+    fn from(value: UccEeType) -> crate::bindings::ucc_ee_type_t {
+        match value {
+            UccEeType::CudaStream => crate::bindings::ucc_ee_type_UCC_EE_CUDA_STREAM,
+            UccEeType::CpuThread => crate::bindings::ucc_ee_type_UCC_EE_CPU_THREAD,
+            UccEeType::RocmStream => crate::bindings::ucc_ee_type_UCC_EE_ROCM_STREAM,
+        }
     }
 }
 
@@ -236,7 +294,7 @@ impl Default for UccExecutionEngineParams {
 impl UccExecutionEngineParams {
     /// Set the execution engine type.
     pub fn with_type(&mut self, ee_type: UccEeType) -> &mut Self {
-        self.0.ee_type = ee_type.0;
+        self.0.ee_type = ee_type.into();
         self
     }
 
@@ -258,6 +316,46 @@ mod tests {
     fn test_ucc_ee_params_default() {
         let _params = UccExecutionEngineParams::default();
         // Just verify it compiles and doesn't panic
+    }
+
+    #[test]
+    fn test_ucc_ee_params_typed_setters() {
+        let ctx = [0u8; 8];
+        let mut params = UccExecutionEngineParams::default();
+        params
+            .with_type(UccEeType::CpuThread)
+            .with_context(ctx.as_ptr() as *mut c_void, ctx.len());
+        assert_eq!(
+            params.0.ee_type,
+            crate::bindings::ucc_ee_type_UCC_EE_CPU_THREAD
+        );
+        assert_eq!(params.0.ee_context_size, 8);
+        assert!(!params.0.ee_context.is_null());
+    }
+
+    #[test]
+    fn test_ucc_ee_type_roundtrip() {
+        let cases = [
+            (
+                UccEeType::CudaStream,
+                crate::bindings::ucc_ee_type_UCC_EE_CUDA_STREAM,
+            ),
+            (
+                UccEeType::CpuThread,
+                crate::bindings::ucc_ee_type_UCC_EE_CPU_THREAD,
+            ),
+            (
+                UccEeType::RocmStream,
+                crate::bindings::ucc_ee_type_UCC_EE_ROCM_STREAM,
+            ),
+        ];
+        for (native, raw) in cases {
+            let converted: crate::bindings::ucc_ee_type_t = native.into();
+            assert_eq!(converted, raw);
+            assert_eq!(UccEeType::from(raw), native);
+        }
+        // Unknown values fall back to the CPU-thread engine.
+        assert_eq!(UccEeType::from(0xFFFF_0000), UccEeType::CpuThread);
     }
 
     #[test]

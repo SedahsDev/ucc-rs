@@ -16,8 +16,7 @@ fn ucc_team_destroy_safe(handle: ucc_team_h) -> crate::bindings::ucc_status_t {
 
 use crate::bindings::{
     ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_h,
-    ucc_ep_range_type_t_UCC_COLLECTIVE_EP_RANGE_CONTIG, ucc_oob_coll_t, ucc_post_ordering_t,
-    ucc_post_ordering_t_UCC_COLLECTIVE_POST_ORDERED, ucc_status_t_UCC_OK, ucc_team_attr,
+    ucc_ep_range_type_t_UCC_COLLECTIVE_EP_RANGE_CONTIG, ucc_status_t_UCC_OK, ucc_team_attr,
     ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_EP, ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE,
     ucc_team_create_post, ucc_team_create_test, ucc_team_destroy, ucc_team_get_attr, ucc_team_h,
     ucc_team_params, ucc_team_params_field_UCC_TEAM_PARAM_FIELD_EP,
@@ -32,6 +31,96 @@ use crate::collective::{DataType, ReductionOp, UccCollectiveRequest};
 use crate::context::UccContext;
 use crate::lib_init::UccSyncType;
 use crate::status::{check_status, UccError, UccStatus};
+
+/// Collective posting ordering.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UccPostOrdering {
+    Unordered = 0,
+    Ordered = 1,
+    Relaxed = 2,
+}
+
+impl From<crate::bindings::ucc_post_ordering_t> for UccPostOrdering {
+    fn from(raw: crate::bindings::ucc_post_ordering_t) -> Self {
+        match raw {
+            0 => Self::Unordered,
+            1 => Self::Ordered,
+            2 => Self::Relaxed,
+            _ => Self::Unordered, // default for unknown
+        }
+    }
+}
+
+impl From<UccPostOrdering> for crate::bindings::ucc_post_ordering_t {
+    fn from(ordering: UccPostOrdering) -> Self {
+        ordering as Self
+    }
+}
+
+/// Native out-of-band collective descriptor.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UccOobColl {
+    pub allgather: Option<
+        unsafe extern "C" fn(
+            *mut std::ffi::c_void,
+            *mut std::ffi::c_void,
+            usize,
+            *mut std::ffi::c_void,
+            *mut *mut std::ffi::c_void,
+        ) -> i32,
+    >,
+    pub req_test: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
+    pub req_free: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
+    pub coll_info: *mut std::ffi::c_void,
+    pub n_oob_eps: usize,
+    pub oob_ep: usize,
+}
+
+impl From<UccOobColl> for crate::bindings::ucc_oob_coll_t {
+    fn from(oob: UccOobColl) -> Self {
+        crate::bindings::ucc_oob_coll {
+            allgather: oob.allgather,
+            req_test: oob.req_test,
+            req_free: oob.req_free,
+            coll_info: oob.coll_info,
+            n_oob_eps: oob.n_oob_eps as u32,
+            oob_ep: oob.oob_ep as u32,
+        }
+    }
+}
+
+impl From<crate::bindings::ucc_oob_coll_t> for UccOobColl {
+    fn from(raw: crate::bindings::ucc_oob_coll_t) -> Self {
+        Self {
+            allgather: raw.allgather,
+            req_test: raw.req_test,
+            req_free: raw.req_free,
+            coll_info: raw.coll_info,
+            n_oob_eps: raw.n_oob_eps as usize,
+            oob_ep: raw.oob_ep as usize,
+        }
+    }
+}
+
+/// Native endpoint range representation, preserving unknown values.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UccEpRangeType(pub u32);
+
+impl UccEpRangeType {
+    pub const CONTIG: Self = Self(ucc_ep_range_type_t_UCC_COLLECTIVE_EP_RANGE_CONTIG);
+}
+
+/// Memory mapping parameters for team creation.
+pub struct UccMemMapParams(crate::bindings::ucc_mem_map_params_t);
+
+impl Default for UccMemMapParams {
+    fn default() -> Self {
+        // Safety: the FFI parameter struct is zero-initialized with no fields requested.
+        Self(unsafe { std::mem::zeroed() })
+    }
+}
 
 /// Internal shared state for UccTeam — Rc-backed so clones share the
 /// same C handle and `ucc_team_destroy` is called exactly once.
@@ -161,7 +250,7 @@ impl UccTeam {
     ///
     /// Sets the requested attribute fields in the mask before calling the
     /// FFI, then returns the populated `ucc_team_attr` struct.
-    pub fn attr(&self, fields: u64) -> Result<ucc_team_attr, UccStatus> {
+    pub fn attr(&self, fields: u64) -> Result<UccTeamAttrs, UccStatus> {
         let mut attr: ucc_team_attr = unsafe { std::mem::zeroed() };
         attr.mask = fields;
         let status = unsafe {
@@ -170,7 +259,12 @@ impl UccTeam {
             ucc_team_get_attr(self.inner.handle, &mut attr)
         };
         check_status(UccStatus::from_raw(status))?;
-        Ok(attr)
+        Ok(UccTeamAttrs(attr))
+    }
+
+    /// Query the requested team attributes through native getters.
+    pub fn get_attr(&self, fields: u64) -> Result<UccTeamAttrs, UccStatus> {
+        self.attr(fields)
     }
 
     /// Explicitly destroy the team handle.
@@ -214,13 +308,13 @@ impl UccTeam {
     /// Get the team's size.
     pub fn size(&self) -> Result<u32, UccStatus> {
         let attr = self.attr(ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE as u64)?;
-        Ok(attr.size)
+        Ok(attr.size())
     }
 
     /// Get the team's endpoint.
     pub fn ep(&self) -> Result<u64, UccStatus> {
         let attr = self.attr(ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_EP as u64)?;
-        Ok(attr.ep)
+        Ok(attr.ep())
     }
 
     /// Perform a non-blocking allreduce collective operation.
@@ -847,6 +941,48 @@ impl Drop for UccTeam {
     }
 }
 
+/// Team attributes returned by UCC.
+#[must_use = "Team attributes contain useful runtime information"]
+pub struct UccTeamAttrs(crate::bindings::ucc_team_attr);
+
+impl UccTeamAttrs {
+    pub fn ordering(&self) -> UccPostOrdering {
+        self.0.ordering.into()
+    }
+
+    pub fn outstanding_colls(&self) -> u64 {
+        self.0.outstanding_colls
+    }
+
+    pub fn ep(&self) -> u64 {
+        self.0.ep
+    }
+
+    pub fn ep_range(&self) -> UccEpRangeType {
+        UccEpRangeType(self.0.ep_range)
+    }
+
+    pub fn sync_type(&self) -> UccSyncType {
+        self.0.sync_type.into()
+    }
+
+    pub fn mem_params(&self) -> UccMemMapParams {
+        UccMemMapParams(self.0.mem_params)
+    }
+
+    pub fn size(&self) -> u32 {
+        self.0.size
+    }
+
+    pub fn eps(&self) -> *mut u64 {
+        self.0.eps
+    }
+
+    pub fn mask(&self) -> u64 {
+        self.0.mask
+    }
+}
+
 /// Parameters for UCC team creation.
 /// Configure team properties like ordering, sync type, and team size.
 #[must_use = "Team params should be used to create a team"]
@@ -860,7 +996,7 @@ impl Default for UccTeamParams {
         // Safety: ucc_team_params is a POD struct with no pointers or discriminants
         // that the C API only reads fields indicated by the mask.
         let mut params: ucc_team_params = unsafe { std::mem::zeroed() };
-        params.ordering = ucc_post_ordering_t_UCC_COLLECTIVE_POST_ORDERED;
+        params.ordering = UccPostOrdering::Unordered.into();
         params.sync_type = ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES;
         // UCC requires either EP+EP_RANGE or OOB to be set for team creation.
         // Default to EP=0 + CONTIG range (single-process mode).
@@ -898,8 +1034,8 @@ impl UccTeamParams {
     }
 
     /// Set the collective posting ordering.
-    pub fn with_ordering(&mut self, ordering: ucc_post_ordering_t) -> &mut Self {
-        self.params.ordering = ordering;
+    pub fn with_ordering(&mut self, ordering: UccPostOrdering) -> &mut Self {
+        self.params.ordering = ordering.into();
         self.params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_ORDERING as u64;
         self
     }
@@ -922,19 +1058,40 @@ impl UccTeamParams {
     ///
     /// The OOB collective is a struct containing function pointers for
     /// out-of-band communication (allgather) used during team setup.
-    pub fn with_oob(&mut self, oob: ucc_oob_coll_t) -> &mut Self {
-        self.params.oob = oob;
+    pub fn with_oob(&mut self, oob: UccOobColl) -> &mut Self {
+        self.params.oob = oob.into();
         self.params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_OOB as u64;
         self
     }
 
-    /// Get mutable access to the underlying FFI struct for advanced configuration.
-    ///
-    /// # Safety
-    /// Directly modifying FFI fields bypasses mask management. Ensure any field
-    /// you set also has its corresponding bit set in `self.params.mask`.
-    pub fn inner_mut(&mut self) -> &mut ucc_team_params {
-        &mut self.params
+    /// Set the maximum number of outstanding collectives.
+    pub fn with_outstanding_colls(&mut self, count: u64) -> &mut Self {
+        self.params.outstanding_colls = count;
+        self.params.mask |=
+            crate::bindings::ucc_team_params_field_UCC_TEAM_PARAM_FIELD_OUTSTANDING_COLLS as u64;
+        self
+    }
+
+    /// Set the team's endpoint.
+    pub fn with_ep(&mut self, ep: u64) -> &mut Self {
+        self.params.ep = ep;
+        self.params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_EP as u64;
+        self
+    }
+
+    /// Set the endpoint range representation.
+    pub fn with_ep_range(&mut self, ep_range: UccEpRangeType) -> &mut Self {
+        self.params.ep_range = ep_range.0;
+        self.params.mask |= ucc_team_params_field_UCC_TEAM_PARAM_FIELD_EP_RANGE as u64;
+        self
+    }
+
+    /// Set memory mapping parameters.
+    pub fn with_mem_params(&mut self, mem_params: UccMemMapParams) -> &mut Self {
+        self.params.mem_params = mem_params.0;
+        self.params.mask |=
+            crate::bindings::ucc_team_params_field_UCC_TEAM_PARAM_FIELD_MEM_PARAMS as u64;
+        self
     }
 }
 
@@ -947,13 +1104,49 @@ mod tests {
     #[test]
     fn test_ucc_team_params_default() {
         let params = UccTeamParams::default();
-        assert_eq!(
-            params.params.ordering,
-            ucc_post_ordering_t_UCC_COLLECTIVE_POST_ORDERED
-        );
+        assert_eq!(params.params.ordering, UccPostOrdering::Unordered as u32);
         assert_eq!(
             params.params.sync_type,
             ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES
+        );
+    }
+
+    #[test]
+    fn test_ucc_post_ordering_round_trip() {
+        for ordering in [
+            UccPostOrdering::Unordered,
+            UccPostOrdering::Ordered,
+            UccPostOrdering::Relaxed,
+        ] {
+            let raw: crate::bindings::ucc_post_ordering_t = ordering.into();
+            assert_eq!(UccPostOrdering::from(raw), ordering);
+        }
+        assert_eq!(UccPostOrdering::from(u32::MAX), UccPostOrdering::Unordered);
+    }
+
+    #[test]
+    fn test_ucc_team_typed_params() {
+        let mut params = UccTeamParams::default();
+        params
+            .with_ordering(UccPostOrdering::Relaxed)
+            .with_outstanding_colls(8)
+            .with_ep(1)
+            .with_ep_range(UccEpRangeType::CONTIG)
+            .with_mem_params(UccMemMapParams::default());
+        assert_eq!(params.params.ordering, UccPostOrdering::Relaxed as u32);
+        assert_eq!(params.params.outstanding_colls, 8);
+        assert_eq!(params.params.ep, 1);
+        assert_ne!(
+            params.params.mask
+                & crate::bindings::ucc_team_params_field_UCC_TEAM_PARAM_FIELD_OUTSTANDING_COLLS
+                    as u64,
+            0
+        );
+
+        assert_ne!(
+            params.params.mask
+                & crate::bindings::ucc_team_params_field_UCC_TEAM_PARAM_FIELD_MEM_PARAMS as u64,
+            0
         );
     }
 
@@ -1194,7 +1387,7 @@ mod tests {
             let attr = team
                 .attr(ucc_team_attr_field_UCC_TEAM_ATTR_FIELD_SIZE as u64)
                 .expect("team attr query");
-            assert_eq!(attr.size, 1, "Raw attr size should be 1");
+            assert_eq!(attr.size(), 1, "Raw attr size should be 1");
         }
 
         /// Integration test: explicit destroy then drop (no double-free)

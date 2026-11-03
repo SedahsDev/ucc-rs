@@ -617,14 +617,15 @@ impl<'a> UccCollective<'a> {
     ///
     /// # Safety
     ///
-    /// The event pointer must be valid and obtained from the execution engine
-    /// (e.g., via `UccExecutionEngine::wait_event()`).
+    /// The `ee` and `event` must be valid and obtained from the execution engine
+    /// (e.g., via `UccExecutionEngine::wait_event()`). The event must remain
+    /// valid for the duration of the triggered post call.
     pub unsafe fn triggered_post(
         &self,
-        ee_handle: crate::bindings::ucc_ee_h,
-        event: *mut crate::bindings::ucc_ev_t,
+        ee: &crate::event_engine::UccExecutionEngine,
+        event: &crate::event_engine::UccEvent,
     ) -> Result<(), UccStatus> {
-        let status = ucc_collective_triggered_post(ee_handle, event);
+        let status = ucc_collective_triggered_post(ee.as_raw(), event.as_raw());
         check_status(UccStatus::from_raw(status))
     }
 
@@ -703,6 +704,8 @@ impl<'a> Drop for UccCollective<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::UccContext;
+    use crate::lib_init::UccLib;
 
     #[test]
     fn test_collective_type_as_raw() {
@@ -873,5 +876,45 @@ mod tests {
 
         drop(mock_request);
         // If we reach here, no panic occurred
+    }
+
+    #[test]
+    #[ignore = "requires a UCC backend with allgather support"]
+    fn allgather_counts_zero_send_elems() {
+        let lib = UccLib::init().unwrap();
+        let ctx = UccContext::new(lib.clone()).unwrap();
+        let team = UccTeam::new(ctx.clone()).unwrap();
+        let team_size = 1;
+        let send_elems = 0;
+        let send_buf: &[u8] = &[];
+        let mut recv_buf = vec![0u8; team_size * send_elems];
+
+        let request = team
+            .allgather(send_buf, &mut recv_buf, DataType::Uint8)
+            .unwrap();
+        while !request.test().unwrap() {}
+        assert_eq!(request.raw_status(), ucc_status_t_UCC_OK);
+        drop(request);
+
+        assert!(recv_buf.is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires a UCC backend with allgather support"]
+    fn allgather_counts_single_rank() {
+        let lib = UccLib::init().unwrap();
+        let ctx = UccContext::new(lib.clone()).unwrap();
+        let team = UccTeam::new(ctx.clone()).unwrap();
+        let send_buf = [1u8, 2, 3, 4];
+        let mut recv_buf = [0u8; 4];
+
+        let request = team
+            .allgather(&send_buf, &mut recv_buf, DataType::Uint8)
+            .unwrap();
+        while !request.test().unwrap() {}
+        assert_eq!(request.raw_status(), ucc_status_t_UCC_OK);
+        drop(request);
+
+        assert_eq!(recv_buf, send_buf);
     }
 }
