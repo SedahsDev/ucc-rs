@@ -21,6 +21,9 @@ use crate::bindings::{
     ucc_reduction_op_t_UCC_OP_PROD, ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t,
     ucc_status_t_UCC_INPROGRESS, ucc_status_t_UCC_OK, ucc_status_t_UCC_OPERATION_INITIALIZED,
 };
+use crate::status::{check_status, UccError, UccStatus};
+use crate::team::UccTeam;
+use std::mem;
 
 /// `ucc_collective_test` is a `static inline` function in the UCC 1.9 header
 /// (`ucc/api/ucc.h`: `return request->status;`), so it is not an exported
@@ -34,10 +37,6 @@ use crate::bindings::{
 unsafe fn ucc_collective_test(request: ucc_coll_req_h) -> ucc_status_t {
     (*request).status
 }
-
-use crate::status::{check_status, UccError, UccStatus};
-use crate::team::UccTeam;
-use std::mem;
 
 /// Collective type enum for safe API usage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
