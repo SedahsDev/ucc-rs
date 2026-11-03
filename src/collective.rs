@@ -25,6 +25,19 @@ use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
 use std::mem;
 
+/// `ucc_collective_test` is a `static inline` function in the UCC 1.9 header
+/// (`ucc/api/ucc.h`: `return request->status;`), so it is not an exported
+/// library symbol and cannot be declared `extern "C"`. Reproduce its exact
+/// semantics here; every call-site goes through this single wrapper, so if a
+/// future UCC makes `ucc_coll_req_t` truly opaque, only this body changes.
+///
+/// # Safety
+/// `request` must be a valid `ucc_coll_req_h` (non-null, not finalized).
+#[inline]
+unsafe fn ucc_collective_test(request: ucc_coll_req_h) -> ucc_status_t {
+    (*request).status
+}
+
 /// Collective type enum for safe API usage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -172,7 +185,7 @@ impl<'a> UccCollectiveRequest<'a> {
     /// or check() for idiomatic Rust code.
     #[allow(non_upper_case_globals)]
     pub(crate) fn raw_status(&self) -> ucc_status_t {
-        unsafe { (*self.request).status }
+        unsafe { ucc_collective_test(self.request) }
     }
 
     /// Check if the collective operation has completed.
@@ -218,14 +231,13 @@ impl<'a> UccCollectiveRequest<'a> {
     /// Returns `Ok(true)` if the operation is complete, `Ok(false)` if
     /// still in progress, or `Err` if the operation failed.
     ///
-    /// This is a Rust equivalent of the C `ucc_collective_test()` inline
-    /// function — reads `request->status` directly.
+    /// Polls the request via the `ucc_collective_test()` wrapper (a
+    /// `static inline` accessor in the UCC header, reproduced in this module).
     #[allow(non_upper_case_globals)]
     pub fn test(&self) -> Result<bool, UccStatus> {
         let status = unsafe {
             // Safety: self.request is a valid handle from ucc_collective_init_and_post.
-            // ucc_collective_test is just `return request->status;`
-            (*self.request).status
+            ucc_collective_test(self.request)
         };
         match status {
             ucc_status_t_UCC_OK => {
@@ -560,7 +572,7 @@ impl<'a> UccCollective<'a> {
     /// or check() for idiomatic Rust code.
     #[allow(non_upper_case_globals)]
     pub(crate) fn raw_status(&self) -> ucc_status_t {
-        unsafe { (*self.request).status }
+        unsafe { ucc_collective_test(self.request) }
     }
 
     /// Check if the collective operation has completed.
@@ -660,12 +672,14 @@ impl<'a> UccCollective<'a> {
     }
 
     /// Test whether this collective has completed and track completion for drop.
+    ///
+    /// Polls the request via the `ucc_collective_test()` wrapper (a
+    /// `static inline` accessor in the UCC header, reproduced in this module).
     #[allow(non_upper_case_globals)]
     pub fn test(&self) -> Result<bool, UccStatus> {
         let status = unsafe {
             // SAFETY: self.request is a valid handle from ucc_collective_init_and_post.
-            // ucc_collective_test is just `return request->status;`
-            (*self.request).status
+            ucc_collective_test(self.request)
         };
         match status {
             ucc_status_t_UCC_OK => {
