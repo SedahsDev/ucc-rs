@@ -9,10 +9,34 @@ use crate::bindings::{
     ucc_context_create, ucc_context_destroy, ucc_context_get_attr, ucc_context_h,
     ucc_context_params, ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE, ucc_context_progress,
-    ucc_context_type_t, ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
 };
 use crate::lib_init::{UccLib, UccSyncType};
 use crate::status::{check_status, UccError, UccStatus};
+use crate::team::UccOobColl;
+
+/// Native Rust wrapper for ucc_context_type_t
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UccContextType {
+    Exclusive,
+    Shared,
+}
+
+impl UccContextType {
+    pub fn as_raw(&self) -> u32 {
+        match self {
+            UccContextType::Exclusive => crate::bindings::ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
+            UccContextType::Shared => crate::bindings::ucc_context_type_t_UCC_CONTEXT_SHARED,
+        }
+    }
+
+    pub fn from_raw(raw: u32) -> Self {
+        match raw {
+            crate::bindings::ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE => UccContextType::Exclusive,
+            crate::bindings::ucc_context_type_t_UCC_CONTEXT_SHARED => UccContextType::Shared,
+            _ => UccContextType::Exclusive, // default fallback
+        }
+    }
+}
 
 /// UCC context config handle with RAII cleanup.
 ///
@@ -84,7 +108,7 @@ impl UccContextConfig {
     }
 
     /// Get the raw config handle.
-    pub fn handle(&self) -> ucc_context_config_h {
+    pub(crate) fn handle(&self) -> ucc_context_config_h {
         self.handle
     }
 }
@@ -183,7 +207,7 @@ impl UccContext {
     /// let attrs = ctx.get_attr(
     ///     UccContextAttrField::TYPE | UccContextAttrField::SYNC_TYPE
     /// ).unwrap();
-    /// println!("Context type: {}", attrs.context_type());
+    /// println!("Context type: {:?}", attrs.context_type());
     /// ```
     #[must_use = "Result should be checked"]
     pub fn get_attr(&self, mask: u64) -> Result<UccContextAttrs, UccStatus> {
@@ -238,8 +262,8 @@ pub struct UccContextAttrs(crate::bindings::ucc_context_attr_t);
 
 impl UccContextAttrs {
     /// Get the context type.
-    pub fn context_type(&self) -> ucc_context_type_t {
-        self.0.type_
+    pub fn context_type(&self) -> UccContextType {
+        UccContextType::from_raw(self.0.type_)
     }
 
     /// Get the collective sync type.
@@ -312,7 +336,7 @@ impl Default for UccContextParams {
         // Safety: ucc_context_params is a POD struct with no pointers or discriminants
         // that the C API only reads fields indicated by the mask.
         let mut params: ucc_context_params = unsafe { std::mem::zeroed() };
-        params.type_ = ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE;
+        params.type_ = UccContextType::Exclusive.as_raw();
         params.sync_type = ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES;
         params.oob.allgather = None;
         params.oob.req_test = None;
@@ -328,8 +352,8 @@ impl Default for UccContextParams {
 
 impl UccContextParams {
     /// Set the context type.
-    pub fn with_type(&mut self, ctx_type: ucc_context_type_t) {
-        self.0.type_ = ctx_type;
+    pub fn with_type(&mut self, ctx_type: UccContextType) {
+        self.0.type_ = ctx_type.as_raw();
         self.0.mask |=
             crate::bindings::ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE as u64;
     }
@@ -348,18 +372,14 @@ impl UccContextParams {
     }
 
     /// Set OOB callbacks.
-    pub fn with_oob(&mut self, oob: crate::bindings::ucc_context_oob_coll_t) {
-        self.0.oob = oob;
-        // No specific mask bit for OOB in the current bindings; set via inner_mut if needed
-    }
-
-    /// Get mutable access to the underlying FFI struct for advanced configuration.
     ///
-    /// # Safety
-    /// Directly modifying FFI fields bypasses mask management. Ensure any field
-    /// you set also has its corresponding bit set in `self.0.mask`.
-    pub fn inner_mut(&mut self) -> &mut ucc_context_params {
-        &mut self.0
+    /// Takes the same native [`UccOobColl`] wrapper used by team creation:
+    /// `ucc_context_params.oob` and `ucc_team_params.oob` are the *same* C type
+    /// (`ucc_context_oob_coll_t` is an alias of `ucc_oob_coll_t`), so one Rust
+    /// wrapper covers both.
+    pub fn with_oob(&mut self, oob: UccOobColl) {
+        self.0.oob = oob.into();
+        // UCC has no mask bit for the OOB field, so nothing else to update.
     }
 }
 
@@ -373,7 +393,10 @@ mod tests {
     #[test]
     fn test_ucc_context_params_default() {
         let params = UccContextParams::default();
-        assert_eq!(params.0.type_, ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE);
+        assert_eq!(
+            UccContextType::from_raw(params.0.type_),
+            UccContextType::Exclusive
+        );
         assert_eq!(
             params.0.sync_type,
             ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES
@@ -384,7 +407,7 @@ mod tests {
     #[test]
     fn test_ucc_context_params_with_type() {
         let mut params = UccContextParams::default();
-        params.with_type(ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE);
+        params.with_type(UccContextType::Exclusive);
         assert!(params.0.mask & ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE as u64 != 0);
     }
 
@@ -394,6 +417,39 @@ mod tests {
         params.with_id(42);
         assert_eq!(params.0.ctx_id, 42);
         assert!(params.0.mask & ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID as u64 != 0);
+    }
+
+    #[test]
+    fn test_ucc_context_params_with_oob() {
+        unsafe extern "C" fn req_test(_request: *mut std::ffi::c_void) -> i32 {
+            0
+        }
+        let oob = UccOobColl {
+            allgather: None,
+            req_test: Some(req_test),
+            req_free: None,
+            coll_info: std::ptr::null_mut(),
+            n_oob_eps: 4,
+            oob_ep: 1,
+        };
+        let mut params = UccContextParams::default();
+        params.with_oob(oob);
+        assert_eq!(params.0.oob.n_oob_eps, 4);
+        assert_eq!(params.0.oob.oob_ep, 1);
+        assert!(params.0.oob.req_test.is_some());
+        assert!(params.0.oob.allgather.is_none());
+    }
+
+    #[test]
+    fn test_ucc_context_type_roundtrip() {
+        for ty in [UccContextType::Exclusive, UccContextType::Shared] {
+            assert_eq!(UccContextType::from_raw(ty.as_raw()), ty);
+        }
+        // Unknown raw values fall back to the exclusive context type.
+        assert_eq!(
+            UccContextType::from_raw(0xFFFF_FFFF),
+            UccContextType::Exclusive
+        );
     }
 
     #[test]
@@ -439,8 +495,8 @@ mod tests {
                 .get_attr(UccContextAttrField::TYPE.0)
                 .expect("get_attr(TYPE) should succeed");
             assert_eq!(
-                attrs.context_type(),
-                ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE,
+                attrs.context_type().as_raw(),
+                UccContextType::Exclusive.as_raw(),
                 "Default context type should be EXCLUSIVE"
             );
         }

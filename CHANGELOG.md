@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Breaking Changes
+- Wrap context FFI types in native Rust wrappers: `UccContextType` enum replaces `ucc_context_type_t` in `UccContextParams::with_type()` and `UccContextAttrs::context_type()`; `UccContextParams::with_oob()` takes the existing native `UccOobColl` wrapper instead of the raw `ucc_context_oob_coll_t`; `UccContextParams::inner_mut()` removed; `UccContextConfig::handle()` is now `pub(crate)`; the `bindings` module is now `pub(crate)`, so bindgen types are no longer reachable from downstream crates (#36)
 - Wrap event_engine FFI types: `UccExecutionEngineParams::inner_mut()` removed and replaced by typed setters (`with_type(UccEeType)`, `with_context(ptr, size)`); new native `UccEeType` enum replaces `ucc_ee_type_t`; `UccExecutionEngine::{handle, as_raw}()`, `UccEvent::{as_ptr, as_raw, from_raw}()` and the raw-event setters `set_event_raw`/`ack_event_raw` are `pub(crate)`, so `ucc_ee_h`/`ucc_ee_params`/`ucc_ev_t` no longer appear in public signatures (#32)
 - Wrap collective.rs FFI types: `UccEvent` and `UccExecutionEngine` replace raw `ucc_ev_t`/`ucc_ee_h` in `Collective::triggered_post()` signatures; `as_raw()` on `UccCollectiveType`, `UccReductionOp`, `DataType` is `pub(crate)`; `request()` on `UccCollective`/`UccCollectiveRequest` is `pub(crate)` (#38)
 - Wrap team FFI types in native Rust wrappers: `UccPostOrdering`/`UccOobColl`/`UccTeamParams`/`UccTeamAttrs` replace raw bindgen types in public signatures; `UccTeamParams::inner_mut()` removed (typed setters instead); `UccTeam::get_attr()` returns `UccTeamAttrs` with typed getters; `UccTeam::handle()` is now `pub(crate)`
@@ -36,6 +37,9 @@
 - Replace `params.inner_mut().ee_type = ucc_ee_type_UCC_EE_CPU_THREAD` with `params.with_type(UccEeType::CpuThread)`
 - Replace `params.inner_mut().ee_context = ...` with `params.with_context(ptr, size)`
 - Raw execution engine handle access via `handle()` is now internal; use EE methods directly
+- Replace `ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE` with `UccContextType::Exclusive` and `ucc_context_type_t_UCC_CONTEXT_SHARED` with `UccContextType::Shared`
+- For context/team OOB callbacks, construct the native `UccOobColl` (from `team.rs`) instead of the raw `ucc_context_oob_coll_t` / `ucc_oob_coll_t` — they are the same C type
+- Bindgen types are no longer re-exported: `ucc::bindings` is `pub(crate)`, so downstream crates must use the native wrappers
 
 ## 0.1.0
 

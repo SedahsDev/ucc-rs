@@ -26,7 +26,7 @@
 
 // Auto-generated FFI bindings from ucc.h — made public so downstream crates
 // (e.g. osu-rs) can construct OOB callback structs and access FFI constants.
-pub mod bindings;
+pub(crate) mod bindings;
 
 // Re-export status types at crate root for ergonomic access
 pub use status::{check_status, UccError, UccStatus};
