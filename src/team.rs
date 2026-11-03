@@ -330,12 +330,8 @@ impl UccTeam {
     /// * `datatype` — Element data type (e.g., `DataType::Uchar`).
     /// * `op` — Reduction operation (e.g., `ReductionOp::Sum`).
     ///
-    /// # Safety
-    ///
-    /// The input/output buffer slice must remain alive until the returned
-    /// `UccCollectiveRequest` completes. Dropping the buffer before the
-    /// request completes may result in access to freed memory when UCC accesses
-    /// the buffer asynchronously.
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     ///
     /// # Example
     ///
@@ -405,13 +401,6 @@ impl UccTeam {
     ///
     /// Synchronizes all ranks in the team. No data is transferred —
     /// this is a synchronization point only.
-    ///
-    /// # Safety
-    ///
-    /// The input/output buffer slice must remain alive until the returned
-    /// `UccCollectiveRequest` completes. Dropping the buffer before the
-    /// request completes may result in access to freed memory when UCC accesses
-    /// the buffer asynchronously.
     ///
     /// # Example
     ///
@@ -487,12 +476,8 @@ impl UccTeam {
     /// * `recvbuf` — Receive buffer that will hold all ranks' contributions.
     /// * `datatype` — Element data type (e.g., `DataType::Uchar`).
     ///
-    /// # Safety
-    ///
-    /// The input/output buffer slice must remain alive until the returned
-    /// `UccCollectiveRequest` completes. Dropping the buffer before the
-    /// request completes may result in access to freed memory when UCC accesses
-    /// the buffer asynchronously.
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     ///
     /// # Example
     ///
@@ -585,12 +570,8 @@ impl UccTeam {
     /// * `datatype` — Element data type (e.g., `DataType::Uchar`).
     /// * `root` — Rank of the root process that sends the data.
     ///
-    /// # Safety
-    ///
-    /// The input/output buffer slice must remain alive until the returned
-    /// `UccCollectiveRequest` completes. Dropping the buffer before the
-    /// request completes may result in access to freed memory when UCC accesses
-    /// the buffer asynchronously.
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     ///
     /// # Example
     ///
@@ -669,12 +650,8 @@ impl UccTeam {
     /// * `op` — Reduction operation (e.g., `ReductionOp::Sum`).
     /// * `root` — Rank of the root process that receives the result.
     ///
-    /// # Safety
-    ///
-    /// The input/output buffer slice must remain alive until the returned
-    /// `UccCollectiveRequest` completes. Dropping the buffer before the
-    /// request completes may result in access to freed memory when UCC accesses
-    /// the buffer asynchronously.
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     ///
     /// # Example
     ///
@@ -746,12 +723,8 @@ impl UccTeam {
 
     /// Non-blocking gather: all ranks send, root receives.
     ///
-    /// # Safety
-    ///
-    /// The input/output buffer slice must remain alive until the returned
-    /// `UccCollectiveRequest` completes. Dropping the buffer before the
-    /// request completes may result in access to freed memory when UCC accesses
-    /// the buffer asynchronously.
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     #[must_use = "Result should be checked"]
     pub fn gather<'a>(
         &'a self,
@@ -802,12 +775,8 @@ impl UccTeam {
 
     /// Non-blocking scatter: root sends, all ranks receive.
     ///
-    /// # Safety
-    ///
-    /// The input/output buffer slice must remain alive until the returned
-    /// `UccCollectiveRequest` completes. Dropping the buffer before the
-    /// request completes may result in access to freed memory when UCC accesses
-    /// the buffer asynchronously.
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     #[must_use = "Result should be checked"]
     pub fn scatter<'a>(
         &'a self,
@@ -858,12 +827,8 @@ impl UccTeam {
 
     /// Non-blocking alltoall.
     ///
-    /// # Safety
-    ///
-    /// The input/output buffer slice must remain alive until the returned
-    /// `UccCollectiveRequest` completes. Dropping the buffer before the
-    /// request completes may result in access to freed memory when UCC accesses
-    /// the buffer asynchronously.
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     #[must_use = "Result should be checked"]
     pub fn alltoall<'a>(
         &'a self,
@@ -912,12 +877,8 @@ impl UccTeam {
 
     /// Non-blocking reduce-scatter.
     ///
-    /// # Safety
-    ///
-    /// The input/output buffer slice must remain alive until the returned
-    /// `UccCollectiveRequest` completes. Dropping the buffer before the
-    /// request completes may result in access to freed memory when UCC accesses
-    /// the buffer asynchronously.
+    /// Note: the buffer slices must outlive the returned
+    /// `UccCollectiveRequest<'a>` — the `'a` lifetime enforces this.
     #[must_use = "Result should be checked"]
     pub fn reduce_scatter<'a>(
         &'a self,
