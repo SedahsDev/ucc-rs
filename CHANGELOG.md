@@ -15,6 +15,9 @@
 ### Features
 - `UccLib::finalize(&mut self) -> Result<(), UccStatus>`: explicit, fallible teardown of the library handle (#25). Rejected with an error while other `UccLib` clones exist or after a prior finalize; `Drop` still auto-finalizes when `finalize()` was not called.
 
+### Documentation
+- Document the buffer-lifetime requirement on the `UccTeam` convenience collectives (`allreduce`, `allgather`, `bcast`, `reduce`, `gather`, `scatter`, `alltoall`, `reduce_scatter`) and on `CollectiveBuilder`: the buffer slices must outlive the returned request, which the `'a` lifetime enforces (#48)
+
 ### Tests
 - Add edge-case tests for allgather_counts: `allgather_counts_zero_send_elems` and `allgather_counts_single_rank` (#49)
 
