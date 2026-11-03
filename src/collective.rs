@@ -319,6 +319,10 @@ impl<'a> Drop for UccCollectiveRequest<'a> {
 ///     .init(&team)
 ///     .unwrap();
 /// ```
+///
+/// Note: The input/output buffer slice must remain alive until the collective
+/// request completes. The lifetime `'a` on the returned `UccCollective<'a>`
+/// ties it to the buffer borrow.
 pub struct CollectiveBuilder<'a> {
     coll_type: UccCollectiveType,
     /// Host buffer pointer for `src.info.buffer` (live until coll completes).
