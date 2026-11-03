@@ -7,12 +7,12 @@ use crate::bindings::{
     ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES, ucc_context_config_h, ucc_context_config_modify,
     ucc_context_config_print, ucc_context_config_read, ucc_context_config_release,
     ucc_context_create, ucc_context_destroy, ucc_context_get_attr, ucc_context_h,
-    ucc_context_oob_coll_t, ucc_context_params,
-    ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE,
+    ucc_context_params, ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_SYNC_TYPE,
     ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_TYPE, ucc_context_progress,
 };
 use crate::lib_init::{UccLib, UccSyncType};
 use crate::status::{check_status, UccError, UccStatus};
+use crate::team::UccOobColl;
 
 /// Native Rust wrapper for ucc_context_type_t
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -34,64 +34,6 @@ impl UccContextType {
             crate::bindings::ucc_context_type_t_UCC_CONTEXT_EXCLUSIVE => UccContextType::Exclusive,
             crate::bindings::ucc_context_type_t_UCC_CONTEXT_SHARED => UccContextType::Shared,
             _ => UccContextType::Exclusive, // default fallback
-        }
-    }
-}
-
-/// Native Rust wrapper for ucc_context_oob_coll_t (OOB collection callbacks)
-#[derive(Clone, Copy, Debug)]
-pub struct UccContextOobColl {
-    pub allgather: Option<
-        unsafe extern "C" fn(
-            *mut libc::c_void,
-            *mut libc::c_void,
-            usize,
-            *mut libc::c_void,
-            *mut *mut libc::c_void,
-        ) -> i32,
-    >,
-    pub req_test: Option<unsafe extern "C" fn(*mut libc::c_void) -> i32>,
-    pub req_free: Option<unsafe extern "C" fn(*mut libc::c_void) -> i32>,
-    pub coll_info: *mut libc::c_void,
-    pub n_oob_eps: u32,
-    pub oob_ep: u32,
-}
-
-impl Default for UccContextOobColl {
-    fn default() -> Self {
-        Self {
-            allgather: None,
-            req_test: None,
-            req_free: None,
-            coll_info: std::ptr::null_mut(),
-            n_oob_eps: 0,
-            oob_ep: 0,
-        }
-    }
-}
-
-impl From<ucc_context_oob_coll_t> for UccContextOobColl {
-    fn from(raw: ucc_context_oob_coll_t) -> Self {
-        Self {
-            allgather: raw.allgather,
-            req_test: raw.req_test,
-            req_free: raw.req_free,
-            coll_info: raw.coll_info,
-            n_oob_eps: raw.n_oob_eps,
-            oob_ep: raw.oob_ep,
-        }
-    }
-}
-
-impl From<UccContextOobColl> for ucc_context_oob_coll_t {
-    fn from(native: UccContextOobColl) -> Self {
-        Self {
-            allgather: native.allgather,
-            req_test: native.req_test,
-            req_free: native.req_free,
-            coll_info: native.coll_info,
-            n_oob_eps: native.n_oob_eps,
-            oob_ep: native.oob_ep,
         }
     }
 }
@@ -430,9 +372,14 @@ impl UccContextParams {
     }
 
     /// Set OOB callbacks.
-    pub fn with_oob(&mut self, oob: UccContextOobColl) {
+    ///
+    /// Takes the same native [`UccOobColl`] wrapper used by team creation:
+    /// `ucc_context_params.oob` and `ucc_team_params.oob` are the *same* C type
+    /// (`ucc_context_oob_coll_t` is an alias of `ucc_oob_coll_t`), so one Rust
+    /// wrapper covers both.
+    pub fn with_oob(&mut self, oob: UccOobColl) {
         self.0.oob = oob.into();
-        // No specific mask bit for OOB in the current bindings; set via inner_mut if needed
+        // UCC has no mask bit for the OOB field, so nothing else to update.
     }
 }
 
@@ -470,6 +417,39 @@ mod tests {
         params.with_id(42);
         assert_eq!(params.0.ctx_id, 42);
         assert!(params.0.mask & ucc_context_params_field_UCC_CONTEXT_PARAM_FIELD_ID as u64 != 0);
+    }
+
+    #[test]
+    fn test_ucc_context_params_with_oob() {
+        unsafe extern "C" fn req_test(_request: *mut std::ffi::c_void) -> i32 {
+            0
+        }
+        let oob = UccOobColl {
+            allgather: None,
+            req_test: Some(req_test),
+            req_free: None,
+            coll_info: std::ptr::null_mut(),
+            n_oob_eps: 4,
+            oob_ep: 1,
+        };
+        let mut params = UccContextParams::default();
+        params.with_oob(oob);
+        assert_eq!(params.0.oob.n_oob_eps, 4);
+        assert_eq!(params.0.oob.oob_ep, 1);
+        assert!(params.0.oob.req_test.is_some());
+        assert!(params.0.oob.allgather.is_none());
+    }
+
+    #[test]
+    fn test_ucc_context_type_roundtrip() {
+        for ty in [UccContextType::Exclusive, UccContextType::Shared] {
+            assert_eq!(UccContextType::from_raw(ty.as_raw()), ty);
+        }
+        // Unknown raw values fall back to the exclusive context type.
+        assert_eq!(
+            UccContextType::from_raw(0xFFFF_FFFF),
+            UccContextType::Exclusive
+        );
     }
 
     #[test]
