@@ -215,6 +215,9 @@ pub enum UccStatus {
 }
 
 impl UccStatus {
+    /// Operation completed successfully.
+    pub const OK: Self = Self::Known(UccError::Ok);
+
     /// Convert a raw `ucc_status_t` (`i32`) into a `UccStatus`.
     ///
     /// ```
@@ -280,6 +283,12 @@ impl std::fmt::Display for UccStatus {
 
 impl std::error::Error for UccStatus {}
 
+impl From<i32> for UccStatus {
+    fn from(code: i32) -> Self {
+        Self::from_raw(code)
+    }
+}
+
 impl From<UccError> for UccStatus {
     fn from(e: UccError) -> Self {
         Self::Known(e)
@@ -291,7 +300,8 @@ impl From<UccError> for UccStatus {
 /// Returns `Ok(())` for `UCC_OK` and `Err(UccStatus)` for anything else
 /// (including `UCC_INPROGRESS` and error codes).
 #[must_use = "Status checks should not be ignored"]
-pub fn check_status(status: UccStatus) -> Result<(), UccStatus> {
+pub fn check_status(status: impl Into<UccStatus>) -> Result<(), UccStatus> {
+    let status = status.into();
     if status.is_ok() {
         Ok(())
     } else {
@@ -449,18 +459,20 @@ mod tests {
 
     #[test]
     fn test_check_status_ok() {
-        assert!(check_status(UccStatus::from_raw(0)).is_ok());
+        assert!(check_status(0).is_ok());
+        assert_eq!(check_status(UccStatus::OK), Ok(()));
     }
 
     #[test]
     fn test_check_status_error() {
-        let err = check_status(UccStatus::from_raw(-1)).unwrap_err();
+        let err = check_status(-1).unwrap_err();
         assert_eq!(err, UccStatus::Known(UccError::ErrNotSupported));
+        assert_eq!(check_status(err), Err(err));
     }
 
     #[test]
     fn test_check_status_inprogress() {
-        let err = check_status(UccStatus::from_raw(1)).unwrap_err();
+        let err = check_status(1).unwrap_err();
         assert_eq!(err, UccStatus::Known(UccError::InProgress));
     }
 

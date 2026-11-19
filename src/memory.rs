@@ -29,7 +29,7 @@ use crate::status::{check_status, UccError, UccStatus};
 /// This type wraps the raw `ucc_mem_map_mem_h` pointer and prevents
 /// direct access to the bindgen type from outside this module.
 #[derive(Clone)]
-pub struct UccMemHandleHandle {
+pub(crate) struct UccMemHandleHandle {
     ptr: ucc_mem_map_mem_h,
 }
 
@@ -97,7 +97,7 @@ impl UccMemHandle {
                 &mut memh,
             )
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if memh.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }

@@ -38,6 +38,18 @@ impl UccContextType {
     }
 }
 
+impl From<UccContextType> for u32 {
+    fn from(context_type: UccContextType) -> Self {
+        context_type.as_raw()
+    }
+}
+
+impl From<u32> for UccContextType {
+    fn from(raw: u32) -> Self {
+        Self::from_raw(raw)
+    }
+}
+
 /// UCC context config handle with RAII cleanup.
 ///
 /// Holds a `ucc_context_config_h` obtained from `ucc_context_config_read`.
@@ -58,7 +70,7 @@ impl UccContextConfig {
             // accepts NULL for the parent config argument and only writes to &mut config.
             ucc_context_config_read(lib.handle(), std::ptr::null(), &mut config)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         Ok(Self { handle: config })
     }
 
@@ -104,7 +116,7 @@ impl UccContextConfig {
                 c_value.as_ptr(),
             )
         };
-        check_status(UccStatus::from_raw(status))
+        check_status(status)
     }
 
     /// Get the raw config handle.
@@ -176,7 +188,7 @@ impl UccContext {
             // reference; &mut context is a valid output pointer.
             ucc_context_create(lib_handle, &ctx_params.0, config.handle(), &mut context)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if context.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -220,7 +232,7 @@ impl UccContext {
             // Safety: self.inner.handle is a valid context handle and &mut attr is a valid pointer.
             ucc_context_get_attr(self.inner.handle, &mut attr)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         Ok(UccContextAttrs(attr))
     }
 
@@ -444,6 +456,8 @@ mod tests {
     fn test_ucc_context_type_roundtrip() {
         for ty in [UccContextType::Exclusive, UccContextType::Shared] {
             assert_eq!(UccContextType::from_raw(ty.as_raw()), ty);
+            assert_eq!(u32::from(ty), ty.as_raw());
+            assert_eq!(UccContextType::from(u32::from(ty)), ty);
         }
         // Unknown raw values fall back to the exclusive context type.
         assert_eq!(
