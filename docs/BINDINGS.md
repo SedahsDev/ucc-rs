@@ -4,6 +4,10 @@
 
 The committed `src/bindings.rs` is the source of truth until issue #1 is resolved.
 
+## Committed Bindings Are Source of Truth
+
+Until issue #1 is resolved, the committed `src/bindings.rs` is the source of truth. Do not regenerate bindings unless you are fixing issue #1 or the UCC headers have changed.
+
 ## When to Rerun Bindgen
 
 Rerun bindings generation when:
@@ -22,7 +26,7 @@ export UCC_UPDATE_COMMITTED_BINDINGS=1  # optional, updates committed bindings
 
 ## Version Pinning
 
-Bindings are generated against UCC 1.9.0 headers. This version is pinned in the bindings to ensure compatibility.
+Bindings are generated against UCC 1.9.0 headers. This version is pinned to ensure compatibility.
 
 ## Validation
 

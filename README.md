@@ -2,7 +2,11 @@
 
 Safe Rust bindings for [UCC](https://github.com/openucx/ucc) (Unified Collective Communication).
 
-This crate supports UCC version 1.9.0. The committed bindings were generated from `wrapper.h` includes for this version.
+## UCC Version Requirements
+
+This crate supports UCC versions >= 1.4.4 and < 1.9.
+
+The bindings in `src/bindings.rs` were generated against UCC 1.9.0 headers. `wrapper.h` includes `<ucc/api/ucc.h>` as the C API entry point.
 
 ## Features
 
