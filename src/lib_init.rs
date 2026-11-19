@@ -104,7 +104,7 @@ impl UccLibConfig {
             // and accepts NULL for the first two arguments (lib and parent config).
             ucc_lib_config_read(std::ptr::null(), std::ptr::null(), &mut config)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         Ok(Self { handle: config })
     }
 
@@ -143,7 +143,7 @@ impl UccLibConfig {
             // ucc_lib_config_modify takes 3 args: (config, name, value)
             ucc_lib_config_modify(self.handle, c_name.as_ptr(), c_value.as_ptr())
         };
-        check_status(UccStatus::from_raw(status))
+        check_status(status)
     }
 
     /// Get the raw config handle.
@@ -222,7 +222,7 @@ impl UccLib {
                 &mut lib,
             )
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         // config is dropped here, releasing the config handle
         Ok(Self {
             inner: std::rc::Rc::new(UccLibInner {
@@ -258,7 +258,7 @@ impl UccLib {
             // Safety: handle was validated non-null and is a valid lib handle.
             ucc_finalize(handle)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         inner.finalized.set(true);
         Ok(())
     }
@@ -289,8 +289,8 @@ impl UccLib {
             // Safety: self.inner.handle is a valid lib handle and &mut attr is a valid pointer.
             ucc_lib_get_attr(self.inner.handle, &mut attr)
         };
-        check_status(UccStatus::from_raw(status))?;
-        Ok(UccLibAttrs(attr))
+        check_status(status)?;
+        Ok(UccLibAttrs::from(attr))
     }
 }
 
@@ -404,6 +404,12 @@ impl std::ops::BitOr for UccLibAttrField {
 /// Only fields requested via the mask in `get_attr()` are guaranteed valid.
 #[must_use = "Library attributes contain useful runtime information"]
 pub struct UccLibAttrs(crate::bindings::ucc_lib_attr_t);
+
+impl From<crate::bindings::ucc_lib_attr_t> for UccLibAttrs {
+    fn from(value: crate::bindings::ucc_lib_attr_t) -> Self {
+        Self(value)
+    }
+}
 
 impl UccLibAttrs {
     /// Get the thread mode supported by the library.

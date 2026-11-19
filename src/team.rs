@@ -115,6 +115,18 @@ impl UccEpRangeType {
 /// Memory mapping parameters for team creation.
 pub struct UccMemMapParams(crate::bindings::ucc_mem_map_params_t);
 
+impl From<crate::bindings::ucc_mem_map_params_t> for UccMemMapParams {
+    fn from(raw: crate::bindings::ucc_mem_map_params_t) -> Self {
+        Self(raw)
+    }
+}
+
+impl From<UccMemMapParams> for crate::bindings::ucc_mem_map_params_t {
+    fn from(params: UccMemMapParams) -> Self {
+        params.0
+    }
+}
+
 impl Default for UccMemMapParams {
     fn default() -> Self {
         // Safety: the FFI parameter struct is zero-initialized with no fields requested.
@@ -182,7 +194,7 @@ impl UccTeam {
             let ctx_ptr = &ctx_handle as *const ucc_context_h as *mut ucc_context_h;
             ucc_team_create_post(ctx_ptr, 1, params_ptr, &mut team)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if team.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -258,7 +270,7 @@ impl UccTeam {
             // output pointer with the mask pre-set to request specific fields.
             ucc_team_get_attr(self.inner.handle, &mut attr)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         Ok(UccTeamAttrs(attr))
     }
 
@@ -302,7 +314,7 @@ impl UccTeam {
         }
         // UCC_OK -> Ok(()); any other final status (including a still-pending
         // UCC_INPROGRESS at the iteration cap) -> Err.
-        check_status(UccStatus::from_raw(status))
+        check_status(status)
     }
 
     /// Get the team's size.
@@ -390,7 +402,7 @@ impl UccTeam {
             // self.inner.handle is a valid team handle.
             ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -455,7 +467,7 @@ impl UccTeam {
             // self.inner.handle is a valid team handle.
             ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -548,7 +560,7 @@ impl UccTeam {
             // self.inner.handle is a valid team handle.
             ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -630,7 +642,7 @@ impl UccTeam {
             // self.inner.handle is a valid team handle.
             ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -714,7 +726,7 @@ impl UccTeam {
             // self.inner.handle is a valid team handle.
             ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle)
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -766,7 +778,7 @@ impl UccTeam {
         let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
         let status =
             unsafe { ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle) };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -818,7 +830,7 @@ impl UccTeam {
         let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
         let status =
             unsafe { ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle) };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -868,7 +880,7 @@ impl UccTeam {
         let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
         let status =
             unsafe { ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle) };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -930,7 +942,7 @@ impl UccTeam {
         let mut coll_req: ucc_coll_req_h = std::ptr::null_mut();
         let status =
             unsafe { ucc_collective_init_and_post(&mut args, &mut coll_req, self.inner.handle) };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -968,6 +980,18 @@ impl Drop for UccTeam {
 /// Team attributes returned by UCC.
 #[must_use = "Team attributes contain useful runtime information"]
 pub struct UccTeamAttrs(crate::bindings::ucc_team_attr);
+
+impl From<crate::bindings::ucc_team_attr> for UccTeamAttrs {
+    fn from(raw: crate::bindings::ucc_team_attr) -> Self {
+        Self(raw)
+    }
+}
+
+impl From<UccTeamAttrs> for crate::bindings::ucc_team_attr {
+    fn from(attrs: UccTeamAttrs) -> Self {
+        attrs.0
+    }
+}
 
 impl UccTeamAttrs {
     pub fn ordering(&self) -> UccPostOrdering {

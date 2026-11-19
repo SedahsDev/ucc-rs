@@ -270,7 +270,7 @@ impl<'a> UccCollectiveRequest<'a> {
             // Safety: request is a valid collective request handle.
             ucc_collective_finalize(request)
         };
-        check_status(UccStatus::from_raw(status))
+        check_status(status)
     }
 
     /// Check if the request is still valid (has not been finalized).
@@ -472,7 +472,7 @@ impl<'a> CollectiveBuilder<'a> {
             // SAFETY: args is fully initialized POD; team handle is valid.
             ucc_collective_init(&mut args, &mut coll_req, team.handle())
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -497,7 +497,7 @@ impl<'a> CollectiveBuilder<'a> {
             // SAFETY: args is fully initialized POD; team handle is valid.
             ucc_collective_init_and_post(&mut args, &mut coll_req, team.handle())
         };
-        check_status(UccStatus::from_raw(status))?;
+        check_status(status)?;
         if coll_req.is_null() {
             return Err(UccStatus::Known(UccError::ErrNoResource));
         }
@@ -622,7 +622,7 @@ impl<'a> UccCollective<'a> {
             // Safety: self.request is a valid collective request handle from ucc_collective_init.
             ucc_collective_post(self.request)
         };
-        check_status(UccStatus::from_raw(status))
+        check_status(status)
     }
 
     /// Triggered post — post the collective with an execution engine event.
@@ -642,7 +642,7 @@ impl<'a> UccCollective<'a> {
         event: &crate::event_engine::UccEvent,
     ) -> Result<(), UccStatus> {
         let status = ucc_collective_triggered_post(ee.as_raw(), event.as_raw());
-        check_status(UccStatus::from_raw(status))
+        check_status(status)
     }
 
     /// Explicitly finalize the collective operation.
@@ -657,7 +657,7 @@ impl<'a> UccCollective<'a> {
             // Safety: request is a valid collective request handle.
             ucc_collective_finalize(request)
         };
-        check_status(UccStatus::from_raw(status))
+        check_status(status)
     }
 
     /// Check if the collective is still valid (has not been finalized).

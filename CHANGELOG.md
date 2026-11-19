@@ -3,11 +3,24 @@
 ## Unreleased
 
 ### Breaking Changes
-- Wrap context FFI types in native Rust wrappers: `UccContextType` enum replaces `ucc_context_type_t` in `UccContextParams::with_type()` and `UccContextAttrs::context_type()`; `UccContextParams::with_oob()` takes the existing native `UccOobColl` wrapper instead of the raw `ucc_context_oob_coll_t`; `UccContextParams::inner_mut()` removed; `UccContextConfig::handle()` is now `pub(crate)`; the `bindings` module is now `pub(crate)`, so bindgen types are no longer reachable from downstream crates (#36)
-- Wrap event_engine FFI types: `UccExecutionEngineParams::inner_mut()` removed and replaced by typed setters (`with_type(UccEeType)`, `with_context(ptr, size)`); new native `UccEeType` enum replaces `ucc_ee_type_t`; `UccExecutionEngine::{handle, as_raw}()`, `UccEvent::{as_ptr, as_raw, from_raw}()` and the raw-event setters `set_event_raw`/`ack_event_raw` are `pub(crate)`, so `ucc_ee_h`/`ucc_ee_params`/`ucc_ev_t` no longer appear in public signatures (#32)
+- `UccContextType` is the native enum replacing `ucc_context_type_t` in `UccContextParams::with_type()` and `UccContextAttrs::context_type()` (#36).
+- `UccContextParams` no longer exposes `inner_mut()`; use typed setters instead. `with_oob()` takes the native `UccOobColl` wrapper instead of raw `ucc_context_oob_coll_t` (#36).
+- `UccContextAttrs` exposes native attribute values through typed getters, including `context_type()` (#36).
+- `UccContextConfig::handle()` is now `pub(crate)`; the `bindings` module is now `pub(crate)`, so bindgen types are no longer reachable from downstream crates (#36).
+- `UccExecutionEngineParams` no longer exposes `inner_mut()`; use `with_type(UccEeType)` and `with_context(ptr, size)` instead of modifying raw `ucc_ee_params` fields (#32).
+- `UccEeType` is the native enum replacing `ucc_ee_type_t` (#32).
+- `UccEvent` replaces raw `ucc_ev_t` in public signatures; `as_ptr()`, `as_raw()`, and `from_raw()` are now `pub(crate)` (#32).
+- `UccExecutionEngine::{handle, as_raw}()` and the raw-event setters `set_event_raw`/`ack_event_raw` are now `pub(crate)`, so raw execution-engine handles and events no longer appear in public signatures (#32).
 - Wrap collective.rs FFI types: `UccEvent` and `UccExecutionEngine` replace raw `ucc_ev_t`/`ucc_ee_h` in `Collective::triggered_post()` signatures; `as_raw()` on `UccCollectiveType`, `UccReductionOp`, `DataType` is `pub(crate)`; `request()` on `UccCollective`/`UccCollectiveRequest` is `pub(crate)` (#38)
-- Wrap team FFI types in native Rust wrappers: `UccPostOrdering`/`UccOobColl`/`UccTeamParams`/`UccTeamAttrs` replace raw bindgen types in public signatures; `UccTeamParams::inner_mut()` removed (typed setters instead); `UccTeam::get_attr()` returns `UccTeamAttrs` with typed getters; `UccTeam::handle()` is now `pub(crate)`
-- Wrap lib_init FFI types in native Rust wrappers: `UccThreadMode`/`UccSyncType` enums replace `ucc_thread_mode_t`/`ucc_coll_sync_type_t` in public signatures; `UccLibParams::inner_mut()` removed (typed setters instead); `UccLibAttrs` getters return native types (#30)
+- `UccPostOrdering` is the native enum replacing `ucc_post_ordering_t` in public signatures.
+- `UccOobColl` is the native wrapper replacing raw `ucc_oob_coll_t` and its context alias `ucc_context_oob_coll_t` in public signatures.
+- `UccTeamParams` replaces raw team parameters in public signatures; `inner_mut()` is removed in favor of typed setters.
+- `UccTeamAttrs` replaces raw team attributes returned by `UccTeam::get_attr()` and provides typed getters.
+- `UccTeam::handle()` is now `pub(crate)`.
+- `UccThreadMode` is the native enum replacing `ucc_thread_mode_t` in public signatures (#30).
+- `UccSyncType` is the native enum replacing `ucc_coll_sync_type_t` in public signatures (#30).
+- `UccLibParams` no longer exposes `inner_mut()`; use typed setters instead (#30).
+- `UccLibAttrs` exposes native attribute values through typed getters instead of bindgen types (#30).
 - `UccCollectiveRequest` now requires a lifetime parameter `'a` tied to the buffer borrow. All convenience methods on `UccTeam` (`allreduce`, `bcast`, `allgather`, etc.) now return `UccCollectiveRequest<'a>`.
 - `UccCollective` also now has a lifetime parameter `'a`.
 - `CollectiveBuilder::init` and `CollectiveBuilder::init_and_post` now return `Result<UccCollective<'a>, UccStatus>`.
@@ -34,6 +47,12 @@
 - Migration: Replace `triggered_post(ee_handle, event_ptr)` with `triggered_post(&ee, &event)` using native `UccExecutionEngine` and `UccEvent` types
 
 ### Migration
+- Replace `UccLibParams::inner_mut()`, `UccContextParams::inner_mut()`, and `UccTeamParams::inner_mut()` field assignments with the corresponding `with_*()` setters, passing native enums and wrappers rather than bindgen values
+- Read library, context, and team attributes through `UccLibAttrs`, `UccContextAttrs`, and `UccTeamAttrs` typed getters; `UccTeam::get_attr()` now returns `UccTeamAttrs`
+- Replace `ucc_thread_mode_t_UCC_THREAD_SINGLE` with `UccThreadMode::Single` and `ucc_coll_sync_type_t_UCC_SYNC_COLLECTIVES` with `UccSyncType::Collectives`
+- Replace raw `ucc_post_ordering_t` values with `UccPostOrdering::Unordered`, `UccPostOrdering::Ordered`, or `UccPostOrdering::Relaxed`
+- Replace `triggered_post(ee_handle, event_ptr)` with `triggered_post(&ee, &event)`, using `UccExecutionEngine` and `UccEvent` rather than raw handles or event pointers
+- Callers of resource `handle()`, collective `request()`, or enum `as_raw()` methods must use the native wrapper API instead; these raw accessors are now internal
 - Replace `params.inner_mut().ee_type = ucc_ee_type_UCC_EE_CPU_THREAD` with `params.with_type(UccEeType::CpuThread)`
 - Replace `params.inner_mut().ee_context = ...` with `params.with_context(ptr, size)`
 - Raw execution engine handle access via `handle()` is now internal; use EE methods directly
