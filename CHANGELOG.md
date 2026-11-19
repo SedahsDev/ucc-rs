@@ -60,6 +60,67 @@
 - For context/team OOB callbacks, construct the native `UccOobColl` (from `team.rs`) instead of the raw `ucc_context_oob_coll_t` / `ucc_oob_coll_t` — they are the same C type
 - Bindgen types are no longer re-exported: `ucc::bindings` is `pub(crate)`, so downstream crates must use the native wrappers
 
+### Downstream Migration (Issue #60)
+
+The following changes are required for downstream crates that depend on ucc-rs:
+
+**OOB Callback Types (gups-rs/src/oob.rs:30)**
+
+Replace direct imports from `ucc::bindings`:
+```rust
+// OLD - no longer works
+// Import ucc_oob_coll_t and ucc_oob_context_t from ucc::bindings.
+```
+
+With the native wrapper:
+```rust
+// NEW - use the public API
+use ucc::team::UccOobColl;
+```
+
+The `UccOobColl` type wraps the same C struct (`ucc_oob_coll_t`) but is the public, stable interface.
+
+**Request Status Access (gups-rs/src/comm.rs:473, :510; openshmem-rs/src/coll.rs:144, :194)**
+
+Replace direct access to the `request()` handle and its `status` field:
+```rust
+// OLD - no longer works (request() is pub(crate))
+// Read the status field through req.request() and compare it to UCC_OK.
+// ...
+```
+
+With the safe helper methods:
+```rust
+// NEW - use the public API
+
+// Option 1: Check if complete
+if req.is_complete() {
+    // ...
+}
+
+// Option 2: Get raw status value for comparison
+if req.raw_status() == ucc::status::UccStatus::Ok {
+    // ...
+}
+
+// Option 3: Use check() for error handling
+match req.check() {
+    Ok(()) => { /* success */ }
+    Err(e) => { /* handle error */ }
+}
+```
+
+The methods `is_complete()`, `is_in_progress()`, `raw_status()`, and `check()` are available on both `UccCollective` and `UccCollectiveRequest`.
+
+**Summary of Replacements**
+
+| Old Pattern | New Pattern |
+|-------------|-------------|
+| `ucc::bindings::ucc_oob_coll_t` | `ucc::team::UccOobColl` |
+| `ucc::bindings::ucc_status_t_UCC_OK` | `ucc::status::UccStatus::Ok` |
+| The `status` field accessed through `req.request()` | `req.raw_status()` or `req.is_complete()` |
+| `ucc::bindings::*` (any) | Use the corresponding public wrapper type |
+
 ## 0.1.0
 
 - Portable `build.rs` (`UCC_PREFIX` / include+lib env)
