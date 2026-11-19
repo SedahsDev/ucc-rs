@@ -3,6 +3,22 @@
 ## Unreleased
 
 ### Breaking Changes
+- `UccExecutionEngine::handle()`, `UccEvent::as_ptr()`, `UccCollective::request()`, `UccCollectiveRequest::request()`, `UccCollectiveType::as_raw()`, `DataType::as_raw()`, `UccReductionOp::as_raw()`, and `UccTeam::handle()` are now `pub(crate)` — raw access is internal only.
+- `UccExecutionEngine::set_event_raw()` and `ack_event_raw()` are now `pub(crate)` — use `set_event()` and `ack_event()` with native `UccEvent`.
+- `UccCollective::triggered_post()` now takes `&UccExecutionEngine` and `&UccEvent` instead of raw handles and pointers.
+- `UccTeam::get_attr()` now returns `UccTeamAttrs` instead of raw `ucc_team_attr`.
+- `UccTeamParams::inner_mut()` is removed — use `with_*()` setters instead.
+- `UccPostOrdering` enum replaces raw `ucc_post_ordering_t` values in `UccTeamParams::with_ordering()`.
+- `UccOobColl` wrapper replaces raw `ucc_oob_coll_t` in `UccTeamParams::with_oob()`.
+
+### Migration
+- Replace `ee.handle()` with direct use of the `UccExecutionEngine` instance.
+- Replace `event.as_ptr()` with `&event` in `triggered_post()`.
+- Replace `params.inner_mut().ordering = value` with `params.with_ordering(UccPostOrdering::Ordered)`.
+- Replace `params.inner_mut().oob = value` with `params.with_oob(UccOobColl::new(raw_oob))`.
+- Access team attributes through `UccTeamAttrs` typed getters: `attrs.ordering()`, `attrs.outstanding_colls()`, etc.
+
+### Breaking Changes
 - `UccContextType` is the native enum replacing `ucc_context_type_t` in `UccContextParams::with_type()` and `UccContextAttrs::context_type()` (#36).
 - `UccContextParams` no longer exposes `inner_mut()`; use typed setters instead. `with_oob()` takes the native `UccOobColl` wrapper instead of raw `ucc_context_oob_coll_t` (#36).
 - `UccContextAttrs` exposes native attribute values through typed getters, including `context_type()` (#36).

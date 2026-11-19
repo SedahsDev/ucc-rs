@@ -21,6 +21,7 @@ use crate::bindings::{
     ucc_reduction_op_t_UCC_OP_PROD, ucc_reduction_op_t_UCC_OP_SUM, ucc_status_t,
     ucc_status_t_UCC_INPROGRESS, ucc_status_t_UCC_OK, ucc_status_t_UCC_OPERATION_INITIALIZED,
 };
+use crate::event_engine::{UccEvent, UccExecutionEngine};
 use crate::status::{check_status, UccError, UccStatus};
 use crate::team::UccTeam;
 use std::mem;
@@ -557,7 +558,7 @@ impl<'a> CollectiveBuilder<'a> {
 /// finalizing it while in flight (UB).
 #[must_use = "Collective operations should be posted and waited on"]
 pub struct UccCollective<'a> {
-    request: ucc_coll_req_h,
+    pub(crate) request: crate::bindings::ucc_coll_req_h,
     coll_type: UccCollectiveType,
     completed: std::cell::Cell<bool>,
     _team: UccTeam,
@@ -638,11 +639,13 @@ impl<'a> UccCollective<'a> {
     /// valid for the duration of the triggered post call.
     pub unsafe fn triggered_post(
         &self,
-        ee: &crate::event_engine::UccExecutionEngine,
-        event: &crate::event_engine::UccEvent,
+        ee: &UccExecutionEngine,
+        event: &UccEvent,
     ) -> Result<(), UccStatus> {
-        let status = ucc_collective_triggered_post(ee.as_raw(), event.as_raw());
-        check_status(status)
+        unsafe {
+            let status = ucc_collective_triggered_post(ee.handle(), event.as_ptr());
+            check_status(status)
+        }
     }
 
     /// Explicitly finalize the collective operation.
@@ -667,7 +670,7 @@ impl<'a> UccCollective<'a> {
 
     /// Get the raw request handle for internal use.
     #[allow(dead_code)]
-    pub(crate) fn request(&self) -> ucc_coll_req_h {
+    pub(crate) fn request(&self) -> crate::bindings::ucc_coll_req_h {
         self.request
     }
 
