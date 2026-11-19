@@ -34,8 +34,9 @@ use crate::status::{check_status, UccError, UccStatus};
 
 /// Collective posting ordering.
 #[repr(u32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UccPostOrdering {
+    #[default]
     Unordered = 0,
     Ordered = 1,
     Relaxed = 2,
@@ -59,47 +60,28 @@ impl From<UccPostOrdering> for crate::bindings::ucc_post_ordering_t {
 }
 
 /// Native out-of-band collective descriptor.
-#[derive(Clone, Copy, Debug, Default)]
+///
+/// This is a zero-cost wrapper around the raw FFI type.
+#[repr(transparent)]
 pub struct UccOobColl {
-    pub allgather: Option<
-        unsafe extern "C" fn(
-            *mut std::ffi::c_void,
-            *mut std::ffi::c_void,
-            usize,
-            *mut std::ffi::c_void,
-            *mut *mut std::ffi::c_void,
-        ) -> i32,
-    >,
-    pub req_test: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
-    pub req_free: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
-    pub coll_info: *mut std::ffi::c_void,
-    pub n_oob_eps: usize,
-    pub oob_ep: usize,
+    pub(crate) inner: crate::bindings::ucc_oob_coll_t,
+}
+
+impl UccOobColl {
+    pub(crate) fn new(inner: crate::bindings::ucc_oob_coll_t) -> Self {
+        Self { inner }
+    }
 }
 
 impl From<UccOobColl> for crate::bindings::ucc_oob_coll_t {
     fn from(oob: UccOobColl) -> Self {
-        crate::bindings::ucc_oob_coll {
-            allgather: oob.allgather,
-            req_test: oob.req_test,
-            req_free: oob.req_free,
-            coll_info: oob.coll_info,
-            n_oob_eps: oob.n_oob_eps as u32,
-            oob_ep: oob.oob_ep as u32,
-        }
+        oob.inner
     }
 }
 
 impl From<crate::bindings::ucc_oob_coll_t> for UccOobColl {
     fn from(raw: crate::bindings::ucc_oob_coll_t) -> Self {
-        Self {
-            allgather: raw.allgather,
-            req_test: raw.req_test,
-            req_free: raw.req_free,
-            coll_info: raw.coll_info,
-            n_oob_eps: raw.n_oob_eps as usize,
-            oob_ep: raw.oob_ep as usize,
-        }
+        Self::new(raw)
     }
 }
 
@@ -271,7 +253,7 @@ impl UccTeam {
             ucc_team_get_attr(self.inner.handle, &mut attr)
         };
         check_status(status)?;
-        Ok(UccTeamAttrs(attr))
+        Ok(UccTeamAttrs::from_raw(attr))
     }
 
     /// Query the requested team attributes through native getters.
@@ -994,6 +976,10 @@ impl From<UccTeamAttrs> for crate::bindings::ucc_team_attr {
 }
 
 impl UccTeamAttrs {
+    pub(crate) fn from_raw(raw: crate::bindings::ucc_team_attr) -> Self {
+        Self(raw)
+    }
+
     pub fn ordering(&self) -> UccPostOrdering {
         self.0.ordering.into()
     }
@@ -1020,10 +1006,6 @@ impl UccTeamAttrs {
 
     pub fn size(&self) -> u32 {
         self.0.size
-    }
-
-    pub fn eps(&self) -> *mut u64 {
-        self.0.eps
     }
 
     pub fn mask(&self) -> u64 {

@@ -108,7 +108,7 @@ impl UccExecutionEngine {
     }
 
     /// Get a raw handle for use with lower-level APIs.
-    pub(crate) fn handle(&self) -> ucc_ee_h {
+    pub(crate) fn handle(&self) -> crate::bindings::ucc_ee_h {
         self.as_raw()
     }
 

@@ -436,14 +436,14 @@ mod tests {
         unsafe extern "C" fn req_test(_request: *mut std::ffi::c_void) -> i32 {
             0
         }
-        let oob = UccOobColl {
+        let oob = UccOobColl::from(crate::bindings::ucc_oob_coll_t {
             allgather: None,
             req_test: Some(req_test),
             req_free: None,
             coll_info: std::ptr::null_mut(),
             n_oob_eps: 4,
             oob_ep: 1,
-        };
+        });
         let mut params = UccContextParams::default();
         params.with_oob(oob);
         assert_eq!(params.0.oob.n_oob_eps, 4);
